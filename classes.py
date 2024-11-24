@@ -5,6 +5,7 @@ from pygame.locals import *
 import threading
 import time
 import random
+from collections import defaultdict
 
 
 pygame.init()
@@ -28,7 +29,7 @@ clock = pygame.time.Clock()
 
 
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Item:
     name: str
     description: str = ''
@@ -36,44 +37,37 @@ class Item:
     quality: str = 'Common'
     trigger: 'Quest' = None # Quest that triggers the item
     price: int = None
-    def __str__(self):
-        return f'{self.name}: {self.description}'
     def trigger_quest(self, player: 'Character'):
         """Trigger the quest for the player."""
         if self.trigger: # Grant reward if available
             player.complete_quest(self.trigger)
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Artifact(Item):
     name: str
     description: str = ''
     traits: dict=None
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Weapon(Item):
     character_class: str = 'Warrior'
     damage: float = 10.0
     durskill: float = 100.0
     quality: str = 'Common'
     weapon_type: str = 'Weapon'
-    def __str__(self):
-        return f'Weapon {self.name} with damage {self.damage} and durskill {self.durskill}'
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Sword(Weapon):
     length: float = 100.0
-    def __str__(self):
-        return f'{self.quality} sword {self.name} with length {self.length}'
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Wand(Weapon):
     weapon_type = 'Wand'
     item_type = 'Wand'
     range: float = 20.0
-    def __str__(self):
-        return f'{self.quality} wand {self.name} with range {self.range} and durskill {self.durskill}'
 
-@dataclass
+
+@dataclass(unsafe_hash=True)
 class Armor(Item):
     character_class: str = 'Warrior'
     defense: float = 0.1
@@ -83,25 +77,20 @@ class Armor(Item):
     durskill: float = 100.0
     quality: str = 'Common'
     slot: str = 'chest'
-    def __str__(self):
-        return f'Armor {self.name} with defense {self.defense}'
 
-@dataclass
+
+@dataclass(unsafe_hash=True)
 class Shield(Weapon):
     weapon_type = 'Shield'
-    def __str__(self):
-        return f'Shield {self.name}'
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Food(Item):
     name: str = 'Food'
     health: float = 5.0
     saturation: float = 2.0
     item_type: str = 'Food'
-    def __str__(self):
-        return f'Food {self.name} with health {self.health} and saturation {self.saturation}'
 
-@dataclass
+@dataclass(unsafe_hash=True)
 class Potion(Food):
     name: str = 'Potion'
     description: str = ''
@@ -109,10 +98,8 @@ class Potion(Food):
     potion_type: str = 'Heal'
     value: float = 10.0
     item_type: str = 'Potion'
-    def __str__(self):
-        return f'Potion {self.name} with health {self.health} and saturation {self.saturation}'
 class Quest: 
-    def __init__(self, name, giver, storyline, objectives, rewards, reputation: float = 0, gold: int = 10, experience: int = 50):
+    def __init__(self, name, giver, storyline, objectives, rewards: list, reputation: float = 0, gold: int = 10, experience: int = 50):
         self.name = name
         self.giver = giver
         self.storyline = storyline
@@ -123,6 +110,7 @@ class Quest:
         self.reputation = reputation
         self.gold = gold
         self.experience = experience
+        self.rewarded = False
 
     def give_rewards(self, player: 'Character'):
         """
@@ -141,39 +129,68 @@ class Quest:
                 print(f"Player {player.name} gained {self.experience} experience.")
                 if len(player.quests) > 1:
                     player.accept_quest = player.quests[-1]
+            self.rewarded = True
         else:
             print(f"Quest '{self.name}' is not completed. Rewards unavailable.")
 
 class Shop:
     def __init__(self, name: str, items: list[Item]):
         """
-        Initialize the shop.
+        Initialize the shop with a name and a list of items for sale.
         """
         self.name = name
-        self.items = items  # List of Item objects
+        self.items = items
 
     def display_items(self):
-        """Display the items available in the shop."""
+        """Display items available in the shop."""
         print(f"Welcome to {self.name}! Here are the items available:")
-        for index, item in enumerate(self.items):
-            print(f"{index + 1}. {item.name} - {item.quality} - {item.description} - {item.price} gold")
+        for idx, item in enumerate(self.items, start=1):
+            price = getattr(item, 'price', 0)
+            print(f"{idx}. {item.name} - {price} gold")
 
-    def buy_item(self, player, item_index):
-        """Handle the player buying an item."""
-        if item_index < 0 or item_index >= len(self.items):
-            print("Invalid item selected.")
+    def buy(self, player: 'Character', item_index: int):
+        """
+        Allow the player to buy an item from the shop.
+        :param player: The player buying the item.
+        :param item_index: The index of the item to buy.
+        """
+        if item_index < 1 or item_index > len(self.items):
+            print("Invalid selection.")
             return
 
-        item = self.items[item_index]
-        if player.gold >= item.price:
-            player.gold -= item.price
+        item = self.items[item_index - 1]
+        price = getattr(item, 'price', 0)
+
+        if player.gold >= price:
+            player.gold -= price
             player.inventory.add_item(item)
-            print(f"You purchased {item.name} for {item.price} gold.")
+            print(f"You bought {item.name} for {price} gold.")
         else:
-            print("You don't have enough gold to purchase this item!")
+            print("You don't have enough gold to buy this item.")
+
+    def sell(self, player: 'Character', item_index: int):
+        """
+        Allow the player to sell an item to the shop.
+        :param player: The player selling the item.
+        :param item_index: The index of the item in the player's inventory to sell.
+        """
+        if item_index < 1 or item_index > len(player.inventory.contents):
+            print("Invalid selection.")
+            return
+
+        item, quantity = player.inventory.contents[item_index - 1]
+        price = getattr(item, 'price', 0)
+
+        if price > 0:
+            player.gold += price
+            player.inventory.remove_item(item)
+            print(f"You sold {item.name} for {price} gold.")
+        else:
+            print(f"{item.name} cannot be sold.")
 
 
-quests = [Quest(name="Defeat the Guardian", storyline="Defeat the Library Guardian", objectives=["Defeat the Guardian"], rewards=[Wand('Wand')], giver="Library Guardian")]
+
+quests = [Quest(name="Defeat the Guardian", storyline="Defeat the Library Guardian", objectives=["Defeat the Guardian"], rewards=[Wand('Wand', quality='Epic')], giver="Library Guardian")]
 
 
 class CraftingStation:
@@ -186,13 +203,12 @@ class CraftingStation:
         self.station_type = station_type
         self.x = x
         self.y = y
-        self.color = (139, 69, 19)  # Brown for crafting stations
 
     def draw(self, screen):
         """Draw the crafting station on the screen."""
         pygame.draw.rect(screen, self.color, (self.x, self.y, 40, 40))
 
-    def interact(self, player, screen):
+    def interact(self, player: 'Character', screen):
         """Handle interaction with the crafting station."""
         menu_font = pygame.font.Font(None, 36)
         title_font = pygame.font.Font(None, 48)
@@ -209,10 +225,11 @@ class CraftingStation:
 
             # Render available recipes
             y_offset = 150
-            for i, recipe in enumerate(self.recipes):
+            possible_recipes = [j for j in player.inventory.known_recipes if j.required_station == self.station_type]
+            for i, recipe in enumerate(possible_recipes):
                 color = BLACK if i != selected_recipe else RED
                 recipe_text = menu_font.render(
-                    f"{recipe['name']} - Requires: {', '.join(recipe['requirements'])}", True, color
+                    f"{recipe.name} - Requires: {', '.join([': '.join([ingredient[0].name, str(ingredient[1])]) for ingredient in recipe.ingredients])}", True, color
                 )
                 screen.blit(recipe_text, (50, y_offset))
                 y_offset += 40
@@ -226,38 +243,15 @@ class CraftingStation:
                     exit()
                 elif event.type == KEYDOWN:
                     if event.key == K_DOWN:
-                        selected_recipe = (selected_recipe + 1) % len(self.recipes)
+                        selected_recipe = (selected_recipe + 1) % len(possible_recipes)
                     elif event.key == K_UP:
-                        selected_recipe = (selected_recipe - 1) % len(self.recipes)
-                    elif event.key == K_RETURN:  # Craft selected recipe
-                        recipe = self.recipes[selected_recipe]
-                        if self.can_craft(player, recipe):
-                            self.craft(player, recipe)
-                        else:
-                            print("Not enough resources!")
+                        selected_recipe = (selected_recipe - 1) % len(possible_recipes)
+                    elif event.key == K_RIGHT:  # Craft selected recipe
+                        print(f"Crafting {possible_recipes[selected_recipe].name}...")
+                        recipe = player.inventory.known_recipes[selected_recipe]
+                        player.inventory.craft(recipe, player)
                     elif event.key == K_ESCAPE:  # Exit the crafting menu
                         running_crafting = False
-
-    def can_craft(self, player, recipe):
-        """Check if the player has the required resources."""
-        for requirement in recipe["requirements"]:
-            if not any(item.name == requirement for item in player.inventory.contents):
-                return False
-        return True
-
-    def craft(self, player, recipe):
-        """Craft the item and deduct resources from the inventory."""
-        # Deduct required items
-        for requirement in recipe["requirements"]:
-            for item in player.inventory.contents:
-                if item.name == requirement:
-                    player.inventory.contents.remove(item)
-                    break
-
-        # Add crafted item to the inventory
-        crafted_item = recipe["result"]
-        player.inventory.add_item(crafted_item)
-        print(f"Crafted {crafted_item.name}!")
 
 
 class Companion: # A companion is a non-player character that can assist the player in combat
@@ -387,135 +381,133 @@ class City:
                     elif event.key == K_ESCAPE:  # Exit crafting menu
                         running_menu = False
 
+class Recipe:
+    def __init__(self, name: str, ingredients: list[tuple[Item, int]], result: Item, required_station: str, experience: int):
+        self.name = name
+        self.ingredients = ingredients
+        self.result = result
+        self.required_station = required_station
+        self.experience = experience
 
 class Inventory:
-    def __init__(self, player: 'Character'=None, name: str='Inventory', capacity: int=20, contents: list[Item]=[]):
+    def __init__(self, player: 'Character'=None, name: str='Inventory', capacity: int=20, contents: list[tuple[Item, int]]=[], known_recipes: list[Recipe]=[]):
         self.name = name
         self.player = player
         self.capacity = capacity
         self.contents = contents
-        self.known_recipes = {
-            ("Iron Ore", "Wood"): {
-                "result": Weapon(name="Iron Sword", description="A basic iron sword.", damage=15.0),
-                "requirements": {"strength": 5, "crafting_level": 1},
-                "required_station": "Forge",
-                "experience": 25
-            },
-            ("Herbs", "Potion Bottle"): {
-                "result": Potion(name="Healing Potion", description="Restores health.", potion_type="Health", value=20.0),
-                "requirements": {"intelligence": 5},
-                "required_station": "Alchemy Table",
-                "experience": 10
-            }
-        }
+        self.known_recipes = known_recipes
 
-    def discover_recipe(self, recipe: tuple, result: Item, requirements: dict = None):
+    def add_recipe(self, recipe: Recipe):
         """Discover a new crafting recipe."""
         if recipe not in self.known_recipes:
-            self.known_recipes[recipe] = {"result": result, "requirements": requirements or {}}
-            print(f'New recipe discovered: {result.name}')
+            self.known_recipes.append(recipe)
+            print(f'New recipe discovered: {recipe.result.name}')
             print()
         else:
-            print(f'Recipe for {result.name} already known.')
+            print(f'Recipe for {recipe.result.name} already known.')
             print()
-    def check_crafting_requirements(self, requirements: dict, player: 'Character') -> bool:
-        """Check if the player meets the requirements to craft an item."""
-        for stat, value in requirements.items():
-            if stat == "character_class" and player.character_class != value:
-                print(f"Cannot craft this item. Requires {value} class. You are a {player.character_class}.")
-                return False
-            elif stat == "crafting_level" and player.crafting_level < value:
-                print(f"Cannot craft this item. Requires crafting level {value}. Current: {player.crafting_level}.")
-                return False
-            elif stat in vars(player) and getattr(player, stat, 0) < value:
-                print(f"Cannot craft this item. Requires {stat} >= {value}. Current: {getattr(player, stat, 0)}.")
-                return False
-        return True
+    # def check_crafting_requirements(self, requirements: dict, player: 'Character') -> bool:
+    #     """Check if the player meets the requirements to craft an item."""
+    #     for stat, value in requirements.items():
+    #         if stat == "character_class" and player.character_class != value:
+    #             print(f"Cannot craft this item. Requires {value} class. You are a {player.character_class}.")
+    #             return False
+    #         elif stat == "crafting_level" and player.crafting_level < value:
+    #             print(f"Cannot craft this item. Requires crafting level {value}. Current: {player.crafting_level}.")
+    #             return False
+    #         elif stat in vars(player) and getattr(player, stat, 0) < value:
+    #             print(f"Cannot craft this item. Requires {stat} >= {value}. Current: {getattr(player, stat, 0)}.")
+    #             return False
+    #     return True
 
     def calculate_crafted_quality(self, recipe: tuple) -> str:
         """Calculate the quality of the crafted item based on the materials used."""
-        material_quality = [item.quality for item in self.contents if item.name in recipe]
-        if all(q == "Legendary" for q in material_quality):
-            return "Legendary"
-        elif all(q in ("Epic", "Legendary") for q in material_quality):
-            return "Epic"
-        elif all(q in ("Rare", "Epic", "Legendary") for q in material_quality):
-            return "Rare" if any(q == "Rare" for q in material_quality) else "Epic"
-        return "Common"
+        # material_quality = [item[0].quality for item in self.contents if item in recipe]
+        # if all(q == "Legendary" for q in material_quality):
+        #     return "Legendary"
+        # elif all(q in ("Epic", "Legendary") for q in material_quality):
+        #     return "Epic"
+        # elif all(q in ("Rare", "Epic", "Legendary") for q in material_quality):
+        #     return "Rare" if any(q == "Rare" for q in material_quality) else "Epic"
+        # return "Common"
+        return "Crafted"
 
-
-    def craft(self, recipe: tuple, player: 'Character', station: str = None):
+    def craft(self, recipe: Recipe, player: 'Character'):
         """Craft an item using the given recipe."""
-        # Check if the recipe is known
-        if recipe not in self.known_recipes:
-            print("You don't know this recipe yet. Try discovering it first.")
-            return
 
         # Retrieve recipe details
-        recipe_details = self.known_recipes[recipe]
-        required_resources = recipe
-        crafting_requirements = recipe_details["requirements"]
-        result_item = recipe_details["result"]
-        required_station = recipe_details.get("required_station", None)
-        crafting_experience = recipe_details.get("experience", 0)
+        required_resources = recipe.ingredients
+        result_item = recipe.result
+        crafting_experience = recipe.experience
 
         # Check crafting station
-        if required_station and station != required_station:
-            print(f"This recipe requires a {required_station}. You are using a {station}.")
-            return
+        # if required_station and station != required_station:
+        #     print(f"This recipe requires a {required_station}. You are using a {station}.")
+        #     return
 
         # Validate crafting requirements (stats, level, class, etc.)
-        if not self.check_crafting_requirements(crafting_requirements, player):
-            return
+        # if not self.check_crafting_requirements(crafting_requirements, player):
+        #     return
 
         # Validate required resources
-        if not all(any(item.name == material for item in self.contents) for material in required_resources):
-            print("You lack the necessary resources to craft this item.")
-            return
+
+        for material, count in required_resources:
+            if material not in [i[0] for i in self.contents] or self.contents[[i[0] for i in self.contents].index(item)][1] < count:
+                print("You lack the necessary resources to craft this item.")
+                return
 
         # Calculate result item quality based on material quality
         crafted_quality = self.calculate_crafted_quality(required_resources)
         result_item.quality = crafted_quality
-
-        # Remove used resources from inventory
-        for material in required_resources:
-            for item in self.contents:
-                if item.name == material:
-                    self.contents.remove(item)
-                    break
-
-        
-        if self.capacity < len(self.contents) + 1:
+        if self.capacity >= len(self.contents) + 1: # Check if inventory has space
+            # Remove used resources from inventory
+            for material, count in required_resources:
+                for item in range(len([self.contents])):
+                    if self.contents[item] == material:
+                        self.contents[item][-1] -= count
+                        if self.contents[item][-1] == 0:
+                            del self.contents[item]
+                            break
+            # Add crafted item to inventory
             self.add_item(result_item)
             print(f"Crafted a {crafted_quality} {result_item.name}!")
             player.gain_crafting_experience(crafting_experience)
         else:
-            player.storage.add_item(result_item)
-            print(f"Crafted a {crafted_quality} {result_item.name}! Stored in storage.")
+            print("Inventory is full. Cannot craft this item.")
+            print()
 
-    def add_item(self, item: Item):
+    def add_item(self, item: Item, count: int = 1):
         """Add an item to the inventory."""
-        if self.capacity >= len(self.contents) + 1:
-            self.contents.append(item)
-            print(f'Added {item.name} to inventory.')
+        if self.capacity >= len(self.contents) + 1 or item.name in self.contents:
+            if item.name in self.contents:
+                for i in range(len(self.contents)):
+                    if self.contents[i][0].name == item.name:
+                        self.contents[i][1] += count
+                        break
+            else:
+                self.contents.append([item, count])
+            print(f'Added {item.name} x {count} to inventory.')
             item.trigger_quest(self.player)
         else:
-            self.player.storage.add_item(item)
-            print(f'Added {item.name} to storage because inventory is full.')
-        while self.capacity < len(self.contents):
-            self.player.storage.add_item(self.contents.pop())
-
-    def remove_item(self, item: Item):
-        """Remove an item from the inventory."""
-        if item in self.contents:
-            self.contents.remove(item)
-            return item
-        else:
-            print('Item not in inventory')
+            print(f'Inventory is full. Cannot add {item.name}.')
             print()
-            return None
-    def __str__(self):
-            return f'{self.name} with capacity {self.capacity} and contents {[str(i) for i in self.contents]}'
+    def display_recipes(self):
+        """Display all known recipes."""
+        print("Known Recipes:")
+        for recipe in self.known_recipes:
+            ingredients = ", ".join([f"{item} x{qty}" for item, qty in recipe.ingredients.items()])
+            print(f" - {recipe.name}: {ingredients} -> {recipe.result.name}")
+
+
+    # def remove_item(self, item: Item):
+    #     """Remove an item from the inventory."""
+    #     if item in [i[0] for i in self.contents]:
+    #         self.contents.remove(item)
+    #         return item
+    #     else:
+    #         print('Item not in inventory')
+    #         print()
+    #         return None
     def __iter__(self):
         self._index = 0
         return self
@@ -529,38 +521,9 @@ class Inventory:
             raise StopIteration
     def __len__(self):
         return len(self.contents)
-    def take_item_from_storage(self, item: Item):
-        """Take an item from storage and add it to the inventory."""
-        if item in self.player.storage.contents:
-            self.player.storage.contents.remove(item)
-            self.add_item(item)
-        else:
-            print('Item not in storage')
-            print()
-            return None
-    def deposit_item_to_storage(self, item: Item):
-        """Deposit an item from the inventory to storage."""
-        if item in self.contents:
-            self.contents.remove(item)
-            self.player.storage.add_item(item)
-        else:
-            print('Item not in inventory')
-            print()
-            return None
-
-class Storage: # Not inventory, storage is endless and can be accessed from anywhere. Will be reworked later.
-    def __init__(self, name: str, contents: list[Item] = None):
-        self.name = name
-        self.contents = contents or []
-    def __str__(self):
-        return f'{self.name} with contents {[str(i) for i in self.contents]}'
-    def add_item(self, item: Item):
-        """Add an item to the storage."""
-        self.contents.append(item)
-        print(f'Added {item.name} to storage.')
 
 class Character: # Player
-    def __init__(self, name: str, inventory: Inventory, character_class: str, max_health: float=100.0, strength: float=10.0, intelligence: float=10.0, agility: float=10.0, luck: float=10.0,  experience: float=0.0, level: int=1, saturation: float=10.0, max_mana: float=15.0, quests:list[Quest]=[], reputation: dict['Faction': int]={}, completed_quests: list[Quest]=[], city: City=None, race: str='Human', special_abilities: list[str]=[], achievements: list[str]=[], skills: list['Skill']=[], crafting_level: int = 1, crafting_experience: float = 0, gold: int = 100, storage: Storage=Storage(name='Storage'), x: float=400, y: float=300):
+    def __init__(self, name: str, inventory: Inventory, character_class: str, max_health: float=100.0, strength: float=10.0, intelligence: float=10.0, agility: float=10.0, luck: float=10.0,  experience: float=0.0, level: int=1, saturation: float=10.0, max_mana: float=15.0, quests:list[Quest]=[], reputation: dict['Faction': int]={}, completed_quests: list[Quest]=[], city: City=None, race: str='Human', special_abilities: list[str]=[], achievements: list[str]=[], skills: list['Skill']=[], crafting_level: int = 1, crafting_experience: float = 0, gold: int = 100, x: float=400, y: float=300):
         self.x = x
         self.y = y
         self.color = GREEN
@@ -601,7 +564,6 @@ class Character: # Player
         self.crafting_level = crafting_level
         self.crafting_experience = crafting_experience
         self.gold = gold
-        self.storage = storage
         self.resting = False
     def move(self, keys):
         """Move the character using the arrow keys."""
@@ -646,7 +608,11 @@ class Character: # Player
             self.quests.remove(quest)
             self.completed_quests.append(quest)
             print(f"Quest '{quest.name}' marked as completed!")
-            quest.give_rewards(self)
+            if self.inventory.capacity - len(self.inventory.contents) >= len(quest.rewards):
+                quest.give_rewards(self)
+            else:
+                print("Not enough space in inventory to receive quest rewards. Clear some space and come to the quest giver to receive rewards.")
+                quest.completed = True
         else:
             print(f"Quest '{quest.name}' cannot be marked complete.")
 
@@ -671,17 +637,19 @@ class Character: # Player
             print(f"{weapon.name} cannot be equipped by a {self.character_class}. Required: {weapon.character_class}.")
             print()
             return
-        if weapon in self.inventory.contents:
+        if weapon in [i[0] for i in self.inventory.contents]:
             if hand == 'right':
                 if self.right_hand:
                     self.disequip_weapon(self.right_hand)
                 self.right_hand = weapon
                 self.damage += weapon.damage
+                print(f"{weapon.name} equipped in right hand. Your damage: {self.damage}")
             elif hand == 'left':
                 if self.left_hand:
                     self.disequip_weapon(self.left_hand)
                 self.left_hand = weapon
                 self.damage += weapon.damage
+                print(f"{weapon.name} equipped in left hand. Your damage: {self.damage}")
         else:
             print('Weapon not in inventory')
             print()
@@ -718,7 +686,7 @@ class Character: # Player
 
     def disequip_weapon(self, weapon: Weapon):
         """Disequip a weapon."""
-        if weapon in self.inventory.contents:
+        if weapon in [i[0] for i in self.inventory.contents]:
             if self.right_hand == weapon:
                 self.right_hand = None
                 self.damage -= weapon.damage
@@ -773,7 +741,7 @@ class Character: # Player
             print(f"{armor.name} cannot be equipped by a {self.character_class}. Required: {armor.character_class}.")
             print()
             return
-        if armor in self.inventory.contents:
+        if armor in [i[0] for i in self.inventory.contents]:
             if armor.slot == 'chest':
                 self.armor_chest = armor
                 if self.armor_chest and self.armor_chest != armor:
@@ -840,13 +808,13 @@ class Character: # Player
     def display_inventory(self):
         """Display the player's inventory."""
         print("Your Inventory:")
-        for item in self.inventory.contents:
+        for item in [i[0] for i in self.inventory.contents]:
             print(f" - {item.name}")
         print(f"Gold: {self.gold}")
 
     def disequip_armor(self, armor: Armor):
         """Disequip an armor."""
-        if armor in self.inventory.contents:
+        if armor in [i[0] for i in self.inventory.contents]:
             if armor.character_class == self.character_class:
                 if self.armor_chest == armor:
                     self.armor_chest = None
@@ -925,49 +893,53 @@ class Character: # Player
         """Consume an item."""
         if not self.check_requirements(item):
             return
-        if item in self.inventory.contents:
-            print(item.item_type)
-            if item.item_type == 'Potion': # potion is a separate class but depends on Item
-                if item.potion_type == 'Health':
-                    self.health += item.value
-                elif item.potion_type == 'Strength':
-                    self.strength += item.value
-                elif item.potion_type == 'Agility':
-                    self.agility += item.value
-                elif item.potion_type == 'Defense':
-                    self.defense += item.value
-                elif item.potion_type == 'Mana':
-                    self.mana += item.value
-                if self.health > self.max_health:
-                    self.health = self.max_health
-                if self.mana > self.max_mana:
-                    self.mana = self.max_mana
-                print(f'{self.name} consumed {item.name} ({item.potion_type}). Health: {self.health}, Mana: {self.mana}')
-                print()
-            elif item.item_type == 'Food':
-                self.saturation += item.saturation
-                self.health += item.health
-                if self.health > self.max_health:
-                    self.health = self.max_health
-                if self.saturation > self.max_saturation:
-                    self.saturation = self.max_saturation
-                print(f'{self.name} consumed {item.name}. Health: {self.health}, saturation: {self.saturation}')
-                print()
+        if item in [i[0] for i in self.inventory.contents]:
+            try:
+                if item.item_type == 'Potion': # potion is a separate class but depends on Item
+                    if item.potion_type == 'Health':
+                        self.health += item.value
+                    elif item.potion_type == 'Strength':
+                        self.strength += item.value
+                    elif item.potion_type == 'Agility':
+                        self.agility += item.value
+                    elif item.potion_type == 'Defense':
+                        self.defense += item.value
+                    elif item.potion_type == 'Mana':
+                        self.mana += item.value
+                    if self.health > self.max_health:
+                        self.health = self.max_health
+                    if self.mana > self.max_mana:
+                        self.mana = self.max_mana
+                    print(f'{self.name} consumed {item.name} ({item.potion_type}). Health: {self.health}, Mana: {self.mana}')
+                    print()
+                elif item.item_type == 'Food':
+                    self.saturation += item.saturation
+                    self.health += item.health
+                    if self.health > self.max_health:
+                        self.health = self.max_health
+                    if self.saturation > self.max_saturation:
+                        self.saturation = self.max_saturation
+                    print(f'{self.name} consumed {item.name}. Health: {self.health}, saturation: {self.saturation}')
+                    print()
+            except AttributeError:
+                print('Consume: Invalid item')
             else:
-                print('Invalid item')
+                print('Consume: Invalid item')
                 print()
         else:
             print(f'{item.name} not found in inventory.')
             print()
-    def use_item(self, item: Item):
-        """Use an item."""
-        if item in self.inventory.contents:
-            if isinstance(item, Weapon):
-                self.equip_weapon(item)
-            elif isinstance(item, Armor):
-                self.equip_armor(item, item.slot)
-        else:
-            print('Item not in inventory')
+    # def use_item(self, item: Item):
+    #     """Use an item."""
+    #     if item in [i[0] for i in self.inventory.contents]:
+    #         if issubclass(item, Weapon):
+    #             self.equip_weapon(item)
+    #         elif issubclass(item, Armor):
+    #             self.equip_armor(item, item.slot)
+    #         elif issubclass(item, Potion) or issubclass(item, Food):
+    #             self.consume(item)
+    #     else:
+    #         print('Item not in inventory')
             print()
     def take_damage(self, damage: float) -> bool:
         """Take damage."""
@@ -1068,22 +1040,6 @@ class Character: # Player
             self.level_up()
             return
         print()
-
-    def interact(self, other: CraftingStation, ingredients: tuple = None):
-        """Interact with an object."""
-        if isinstance(other, CraftingStation):
-            match other.object_type:
-                case 'Potion':
-                    self.Inventory.craft(ingredients, other.object_type)
-                case 'Weapon':
-                    self.Inventory.craft(ingredients, other.object_type)
-                case 'Armor':
-                    self.Inventory.craft(ingredients, other.object_type)
-                case _:
-                    print('Invalid object')
-                    print()
-        else:
-            print('Invalid object')
         
     def rest(self, seconds: int):
         """Rest for a number of seconds and regenerate health and mana."""
@@ -1191,8 +1147,7 @@ class Mob: # Anything that can be killed.
                     attacker.inventory.add_item(self.loot)
                     print(f'You have gained {self.loot.name}!')
                 else:
-                    attacker.storage.add_item(self.loot)
-                    print(f'ou have no room in your inventory for {self.loot.name}, so it has been placed in your storage.')       
+                    print(f'ou have no room in your inventory for {self.loot.name}')       
             if self.trigger: # Grant reward if available
                     attacker.complete_quest(self.trigger)
             # Grant experience
@@ -1269,10 +1224,12 @@ class NPC: # NPC with quests
         self.x = x
         self.y = y
 
-    def give_quest(self, player: 'Character'):
+    def interact(self, player: 'Character'):
         """Give a quest to the player."""
         for quest in self.quests:
-            if quest not in player.quests and quest not in player.completed_quests:
+            if quest in player.quests and quest.completed:
+                player.complete_quest(quest)
+            elif quest not in player.quests and quest not in player.completed_quests:
                 player.accept_quest(quest)
                 print(f"{self.name} has given the quest: '{quest.name}'.")
                 return
@@ -1328,14 +1285,6 @@ class World: # World with cities, mobs, npcs, and events.
         self.events.append({"type": event_type, "details": details})
         print(f"World Event Logged: {event_type} - {details}")
 
-    def update_world(self):
-        """Simulate dynamic changes in the world."""
-        for city in self.cities:
-            city.update_population()
-        for mob in self.mobs:
-            if not mob.alive:
-                mob.respawn()
-
 def render_shop_menu(screen, shop, player):
     """Render the shop menu and handle player interaction."""
     menu_font = pygame.font.Font(None, 36)
@@ -1388,7 +1337,7 @@ def render_shop_menu(screen, shop, player):
                 elif event.key == K_ESCAPE:  # Exit the shop menu
                     running_shop = False
 
-def render_inventory_menu(screen, player):
+def render_inventory_menu(screen, player: Character):
     """Render the inventory menu and handle player interaction."""
     menu_font = pygame.font.Font(None, 36)
     title_font = pygame.font.Font(None, 48)
@@ -1408,7 +1357,7 @@ def render_inventory_menu(screen, player):
         for i, item in enumerate(player.inventory.contents):
             color = BLACK if i != selected_item else RED  # Highlight selected item
             item_text = menu_font.render(
-                f"{item.name} - {item.quality} - {item.description}", True, color
+                f"{item[0].name} - {item[0].quality} - {item[0].description}", True, color
             )
             screen.blit(item_text, (50, y_offset))
             y_offset += 40
@@ -1419,7 +1368,6 @@ def render_inventory_menu(screen, player):
 
         pygame.display.flip()
 
-        # Handle input for inventory menu
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
@@ -1429,14 +1377,26 @@ def render_inventory_menu(screen, player):
                     selected_item = (selected_item + 1) % len(player.inventory.contents)
                 elif event.key == K_UP:
                     selected_item = (selected_item - 1) % len(player.inventory.contents)
-                elif event.key == K_RETURN:  # Use selected item
-                    item = player.inventory.contents[selected_item]
-                    print(f"Using {item.name}...")
-                    if hasattr(item, "use"):
-                        item.use(player)
-                elif event.key == K_d:  # Drop selected item
-                    item = player.inventory.contents.pop(selected_item)
-                    print(f"Dropped {item.name}.")
+                elif event.key == K_RIGHT:  # Use selected item
+                    item = player.inventory.contents[selected_item][0]
+                    if issubclass(item.__class__, Weapon):
+                        print(f"Equipping {item.name}...")
+                        player.equip_weapon(item)
+                    elif issubclass(item.__class__, Armor):
+                        player.equip_armor(item)
+                    elif issubclass(item.__class__, Artifact):
+                        pass
+                    elif issubclass(item.__class__, Item):
+                        player.consume(item)
+                    else:
+                        print("Unusable item!")
+                elif event.key == K_q:  # Drop selected item
+                    item = player.inventory.contents[selected_item][0]
+                    try:
+                        del player.inventory.contents[selected_item]
+                        print(f"Dropped {item.name}.")
+                    except IndexError:
+                        print("No item selected!")
+                    break
                 elif event.key == K_ESCAPE:  # Exit the inventory menu
                     running_inventory = False
-

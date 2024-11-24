@@ -27,22 +27,25 @@ quest1, quest2, quest3 = Quest(
 # ]
 
 recipes = [
-    {
-        "name": "Iron Sword",
-        "requirements": ["Iron Ore", "Wood"],
-        "result": Weapon(name="Iron Sword", description="A sturdy iron sword.", quality="Uncommon", damage=20),
-    },
-    {
-        "name": "Health Potion",
-        "requirements": ["Herbs", "Water"],
-        "result": Item(name="Health Potion", description="Restores health.", quality="Common"),
-    },
-]
-crafting_stations = [
-    CraftingStation(name="Blacksmith Forge", station_type="Forge", x=300, y=300),
-    CraftingStation(name="Alchemy Table", station_type="Alchemy", x=500, y=500)
+    Recipe(
+        name="Iron Sword",
+        ingredients=[(Item("Iron Ore"), 3), (Item("Wood"), 2)],
+        result=Weapon(name="Iron Sword", description="A sturdy iron sword.", quality="Uncommon", damage=20),
+        required_station="Forge",
+        experience=100
+        ),
+    Recipe(
+        name="Health Potion",
+        ingredients=[(Item("Herbs"), 3), (Item("Water"), 1)],
+        result=Potion(name="Health Potion", description="Restores health.", quality="Common", potion_type="Heal", value=30),
+        required_station="Alchemy",
+        experience=50
+    ),
 ]
 
+crafting_stations = [CraftingStation(name="Blacksmith Forge", station_type="Forge", x=300, y=300),
+    CraftingStation(name="Alchemy Table", station_type="Alchemy", x=500, y=500)
+]
 city1 = City(
     name="Ironhold",
     population=5000,
@@ -53,8 +56,6 @@ city1 = City(
     x=300,
     y=400
 )
-
-
 
 
 mob = Mob("Library Guardian", x=200, y=200, health=30, max_health=30, damage=50, trigger=quests[0], loot=Item(name="Book of Knowledge", description="A book containing ancient knowledge.", quality="Legendary"))
@@ -91,8 +92,12 @@ npcs = [
     NPC(name="Eldora", quests=[quest2], x=400, y=400)
 ]
 player = Character("Eldrin",  None,'Warrior', skills=[Skill('Fireball', 'damage', 100, 10)])
-inventory = Inventory(player)
+inventory = Inventory(player, known_recipes=recipes)
 player.inventory = inventory
+player.inventory.add_recipe(recipes[0])
+player.inventory.add_recipe(recipes[1])
+player.inventory.add_item(Item("Wood"), 10)
+player.inventory.add_item(Item("Iron Ore"), 10)
 npcs.append(NPC("Galen", quests=[quests[0]], x=500, y=500))
 world = World('Eldoria', cities, npcs, mobs)
 running = True
@@ -129,11 +134,12 @@ while running:
                 for npc in npcs:
                     if abs(player.x - npc.x) < 50 and abs(player.y - npc.y) < 50:
                         if event.type == KEYDOWN and event.key == K_e:
-                            npc.give_quest(player)
+                            npc.interact(player)
+                            print(*[(quest.name, quest.completed) for quest in player.quests])
                 for city in cities:
                     if abs(player.x - city.x) < 50 and abs(player.y - city.y) < 50:
                         if event.type == KEYDOWN and event.key == K_e:
-                            city.enter(screen, city, player)
+                            city.enter(player, screen)
                 if event.key == K_r:
                     player.rest(5)
             if event.key == K_q:
@@ -215,8 +221,6 @@ while running:
         if random.random() < 0.0001:  # 0.01% chance per tick
             mob.migrate()
 
-    if pygame.time.get_ticks() % 20000 == 0:  # Every 20 seconds
-        world.update_world()
 
     # Update Screen
     pygame.display.flip()
