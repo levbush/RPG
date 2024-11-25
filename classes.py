@@ -5,7 +5,8 @@ from pygame.locals import *
 import threading
 import time
 import random
-from collections import defaultdict
+# from collections import defaultdict
+import builtins
 
 
 pygame.init()
@@ -28,6 +29,31 @@ clock = pygame.time.Clock()
 
 
 
+class Faction:
+    def __init__(self, name: str, description: str='', leader: 'Character'=None, members: list['Character']=[], base_reputation: int=0, influence: int=0):
+        self.name = name
+        self.description = description
+        self.leader = leader
+        self.members = members
+        self.base_reputation = base_reputation
+        self.influence = influence
+    def gain_influence(self, amount):
+        """Increase the faction's influence."""
+        self.influence += amount
+        if self.influence > 100:
+            self.influence = 100
+        print(f"{self.name}'s influence increased to {self.influence}.")
+
+    def lose_influence(self, amount):
+        """Decrease the faction's influence."""
+        self.influence -= amount
+        if self.influence < 0:
+            self.influence = 0
+        print(f"{self.name}'s influence decreased to {self.influence}.")
+
+guild_of_merchants = Faction(name="Guild of Merchants", description="A coalition of traders and shopkeepers.")
+dark_brotherhood = Faction(name="Dark Brotherhood", description="A secretive guild of assassins.", base_reputation=-10)
+factions = [guild_of_merchants, dark_brotherhood]
 
 @dataclass(unsafe_hash=True)
 class Item:
@@ -99,7 +125,7 @@ class Potion(Food):
     value: float = 10.0
     item_type: str = 'Potion'
 class Quest: 
-    def __init__(self, name, giver, storyline, objectives, rewards: list, reputation: float = 0, gold: int = 10, experience: int = 50):
+    def __init__(self, name, giver, storyline, objectives, rewards: list, reputation: float = 0, gold: int = 10, experience: int = 50, faction_rewards: dict['Faction', int] = None, level: int = 1):
         self.name = name
         self.giver = giver
         self.storyline = storyline
@@ -111,6 +137,8 @@ class Quest:
         self.gold = gold
         self.experience = experience
         self.rewarded = False
+        self.faction_rewards = faction_rewards or {}
+        self.level = level
 
     def give_rewards(self, player: 'Character'):
         """
@@ -129,44 +157,25 @@ class Quest:
                 print(f"Player {player.name} gained {self.experience} experience.")
                 if len(player.quests) > 1:
                     player.accept_quest = player.quests[-1]
+            for faction_name, rep_change in self.faction_rewards.items():
+                faction = next(f for f in factions if f.name == faction_name)  # Find the faction by name
+                player.adjust_reputation(faction, rep_change)
+
             self.rewarded = True
         else:
             print(f"Quest '{self.name}' is not completed. Rewards unavailable.")
 
 class Shop:
-    def __init__(self, name: str, items: list[Item]):
+    def __init__(self, name: str, items: list[Item], faction: 'Faction' = None):
         """
-        Initialize the shop with a name and a list of items for sale.
+        Initialize a shop.
+        :param name: Name of the shop.
+        :param items: List of items available for purchase.
+        :param faction: The faction that owns the shop (optional).
         """
         self.name = name
         self.items = items
-
-    def display_items(self):
-        """Display items available in the shop."""
-        print(f"Welcome to {self.name}! Here are the items available:")
-        for idx, item in enumerate(self.items, start=1):
-            price = getattr(item, 'price', 0)
-            print(f"{idx}. {item.name} - {price} gold")
-
-    def buy(self, player: 'Character', item_index: int):
-        """
-        Allow the player to buy an item from the shop.
-        :param player: The player buying the item.
-        :param item_index: The index of the item to buy.
-        """
-        if item_index < 1 or item_index > len(self.items):
-            print("Invalid selection.")
-            return
-
-        item = self.items[item_index - 1]
-        price = getattr(item, 'price', 0)
-
-        if player.gold >= price:
-            player.gold -= price
-            player.inventory.add_item(item)
-            print(f"You bought {item.name} for {price} gold.")
-        else:
-            print("You don't have enough gold to buy this item.")
+        self.faction = faction
 
     def sell(self, player: 'Character', item_index: int):
         """
@@ -194,19 +203,13 @@ quests = [Quest(name="Defeat the Guardian", storyline="Defeat the Library Guardi
 
 
 class CraftingStation:
-    def __init__(self, name, station_type, x, y):
+    def __init__(self, name, station_type: str):
         """
         Initialize the crafting station.
         :param name: Name of the station (e.g., "Blacksmith Forge").
         """
         self.name = name
         self.station_type = station_type
-        self.x = x
-        self.y = y
-
-    def draw(self, screen):
-        """Draw the crafting station on the screen."""
-        pygame.draw.rect(screen, self.color, (self.x, self.y, 40, 40))
 
     def interact(self, player: 'Character', screen):
         """Handle interaction with the crafting station."""
@@ -218,7 +221,7 @@ class CraftingStation:
         while running_crafting:
             # Fill the screen for the crafting menu
             screen.fill(WHITE)
-
+            logger.render(10, SCREEN_HEIGHT - 200)
             # Render crafting station title
             title_text = title_font.render(f"{self.name}", True, BLACK)
             screen.blit(title_text, (50, 50))
@@ -248,7 +251,7 @@ class CraftingStation:
                         selected_recipe = (selected_recipe - 1) % len(possible_recipes)
                     elif event.key == K_RIGHT:  # Craft selected recipe
                         print(f"Crafting {possible_recipes[selected_recipe].name}...")
-                        recipe = player.inventory.known_recipes[selected_recipe]
+                        recipe = possible_recipes[selected_recipe]
                         player.inventory.craft(recipe, player)
                     elif event.key == K_ESCAPE:  # Exit the crafting menu
                         running_crafting = False
@@ -297,12 +300,12 @@ class City:
         menu_font = pygame.font.Font(None, 36)
         title_font = pygame.font.Font(None, 48)
         selected_option = 0
-        options = ["Visit Shop", "Rest at Inn", "Use Crafting Station", "Talk to Locals", "Leave"]
+        options = ["Visit Shop", "Use Crafting Station", "Talk to Locals", "Leave"]
 
         while running_city:
             # Fill screen with city background
             screen.fill(WHITE)
-
+            logger.render(10, SCREEN_HEIGHT - 200)
             # Render city title
             title_text = title_font.render(f"Welcome to {self.name}", True, BLACK)
             screen.blit(title_text, (50, 50))
@@ -331,19 +334,16 @@ class City:
                         if selected_option == 0:  # Visit shop
                             for shop in self.shops:
                                 render_shop_menu(screen, shop, player)
-                        elif selected_option == 1:  # Rest at inn
-                            print(f"{player.name} rested and recovered health.")
-                            player.rest(10)
-                        elif selected_option == 2:  # Use crafting station
+                        elif selected_option == 1:  # Use crafting station
                             self.visit_crafting_station(player, screen)
-                        elif selected_option == 3:  # Talk to locals
+                        elif selected_option == 2:  # Talk to locals
                             print("You chat with the locals and learn about the city.")
-                        elif selected_option == 4:  # Leave the city
+                        elif selected_option == 3:  # Leave the city
                             running_city = False
 
     def draw(self, screen):
         """Draw the city on the screen."""
-        pygame.draw.circle(screen, self.color, (self.x, self.y), 10)  # City marker
+        pygame.draw.rect(screen, self.color, (self.x, self.y, 35, 35))  # City marker
         font = pygame.font.Font(None, 24)
         text = font.render(self.name, True, (0, 0, 0))
         screen.blit(text, (self.x - 5, self.y - 23))
@@ -357,6 +357,7 @@ class City:
         while running_menu:
             # Render crafting stations menu
             screen.fill(WHITE)
+            logger.render(10, SCREEN_HEIGHT - 200)
             y_offset = 100
             for i, station in enumerate(self.crafting_stations):
                 color = BLACK if i != selected_station else RED
@@ -380,6 +381,13 @@ class City:
                         running_menu = False
                     elif event.key == K_ESCAPE:  # Exit crafting menu
                         running_menu = False
+    
+    def draw_at(self, screen, position):
+        """Draw the character at a specific screen position."""
+        pygame.draw.rect(screen, self.color, (*position, 30, 30))
+        font = pygame.font.Font(None, 24)
+        text = font.render(self.name, True, BLACK)
+        screen.blit(text, (position[0], position[1] - 15))
 
 class Recipe:
     def __init__(self, name: str, ingredients: list[tuple[Item, int]], result: Item, required_station: str, experience: int):
@@ -452,7 +460,7 @@ class Inventory:
         # Validate required resources
 
         for material, count in required_resources:
-            if material not in [i[0] for i in self.contents] or self.contents[[i[0] for i in self.contents].index(item)][1] < count:
+            if material not in [i[0] for i in self.contents] or self.contents[[i[0] for i in self.contents].index(material)][1] < count:
                 print("You lack the necessary resources to craft this item.")
                 return
 
@@ -478,8 +486,8 @@ class Inventory:
 
     def add_item(self, item: Item, count: int = 1):
         """Add an item to the inventory."""
-        if self.capacity >= len(self.contents) + 1 or item.name in self.contents:
-            if item.name in self.contents:
+        if self.capacity >= len(self.contents) + 1 or item.name in [i[0].name for i in self.contents]:
+            if item.name in [i[0].name for i in self.contents]:
                 for i in range(len(self.contents)):
                     if self.contents[i][0].name == item.name:
                         self.contents[i][1] += count
@@ -499,15 +507,21 @@ class Inventory:
             print(f" - {recipe.name}: {ingredients} -> {recipe.result.name}")
 
 
-    # def remove_item(self, item: Item):
-    #     """Remove an item from the inventory."""
-    #     if item in [i[0] for i in self.contents]:
-    #         self.contents.remove(item)
-    #         return item
-    #     else:
-    #         print('Item not in inventory')
-    #         print()
-    #         return None
+    def remove_item(self, item: Item):
+        """
+        Remove an item from the inventory.
+        :param item: The item to remove.
+        """
+        for idx, (inv_item, quantity) in enumerate(self.contents):
+            if inv_item.name == item.name:
+                if quantity > 1:
+                    self.contents[idx][1] -= 1
+                else:
+                    self.contents.pop(idx)
+                print(f"Removed {item.name} from inventory.")
+                return
+        print(f"{item.name} not found in inventory.")
+        
     def __iter__(self):
         self._index = 0
         return self
@@ -523,7 +537,7 @@ class Inventory:
         return len(self.contents)
 
 class Character: # Player
-    def __init__(self, name: str, inventory: Inventory, character_class: str, max_health: float=100.0, strength: float=10.0, intelligence: float=10.0, agility: float=10.0, luck: float=10.0,  experience: float=0.0, level: int=1, saturation: float=10.0, max_mana: float=15.0, quests:list[Quest]=[], reputation: dict['Faction': int]={}, completed_quests: list[Quest]=[], city: City=None, race: str='Human', special_abilities: list[str]=[], achievements: list[str]=[], skills: list['Skill']=[], crafting_level: int = 1, crafting_experience: float = 0, gold: int = 100, x: float=400, y: float=300):
+    def __init__(self, name: str, inventory: Inventory, character_class: str, max_health: float=100.0, strength: float=10.0, intelligence: float=10.0, agility: float=10.0, luck: float=10.0,  experience: float=0.0, level: int=1, saturation: float=10.0, max_mana: float=15.0, quests: list[Quest]=[], reputation: dict['Faction': int]={}, completed_quests: list[Quest]=[], city: City=None, race: str='Human', special_abilities: list[str]=[], achievements: list[str]=[], skills: list['Skill']=[], crafting_level: int = 1, crafting_experience: float = 0, gold: int = 100, x: float=400, y: float=300, faction_reputation: dict[str, int]={}, faction: 'Faction' = None):
         self.x = x
         self.y = y
         self.color = GREEN
@@ -548,6 +562,8 @@ class Character: # Player
         self.armor_feet = None
         self.defense = 10.0
         self.damage = 5.0
+        self.faction = faction
+        self.faction_reputation = faction_reputation
         self.city = city
         self.respawn_time = 10
         self.reputation = reputation
@@ -576,6 +592,23 @@ class Character: # Player
         if keys[K_RIGHT]:
             self.x += 5
     
+    def collect_resource(self, resource: 'Resource'):
+        """Collect a resource and add it to the player's inventory."""
+        if len(self.inventory.contents) < self.inventory.capacity:
+            print(f"{self.name} collected {resource.resource_type}.")
+            self.inventory.add_item(Item(name=resource.resource_type, quality=resource.quantity))
+            resource.collected = True
+            threading.Thread(target=resource.respawn).start()
+        elif resource.resource_type in [i[0].name for i in self.inventory.contents]:
+            for i in range(len(self.inventory)):
+                if self.inventory.contents[i][0].name == resource.resource_type:
+                    self.inventory.contents[i][1] += 1
+            print(f"{self.name} collected {resource.resource_type}.")
+            resource.collected = True
+            threading.Thread(target=resource.respawn).start()
+        else:
+            print('Not enough space in inventory')
+
     def draw(self, screen):
         """Draw the character on the screen."""
         if self.alive:
@@ -583,6 +616,35 @@ class Character: # Player
             font = pygame.font.Font(None, 24)
             text = font.render(self.name, True, (0, 0, 0))
             screen.blit(text, (self.x, self.y - 15))
+    def adjust_reputation(self, faction: 'Faction', amount: int):
+        """
+        Adjust the player's reputation with a specific faction.
+        :param faction: The faction object.
+        :param amount: The amount to adjust reputation by (positive or negative).
+        """
+        if faction.name not in self.faction_reputation:
+            self.faction_reputation[faction.name] = faction.base_reputation
+
+        self.faction_reputation[faction.name] += amount
+        print(f"Reputation with {faction.name} is now {self.faction_reputation[faction.name]} ({self.get_reputation_tier(faction)}).")
+
+    def get_reputation_tier(self, faction: 'Faction') -> str:
+        """
+        Get the player's reputation tier with a faction.
+        :param faction: The faction object.
+        :return: The reputation tier (e.g., 'Hostile', 'Neutral', 'Friendly').
+        """
+        reputation = self.faction_reputation.get(faction.name, faction.base_reputation)
+        if reputation < -50:
+            return "Hostile"
+        elif -50 <= reputation < 0:
+            return "Unfriendly"
+        elif 0 <= reputation < 50:
+            return "Neutral"
+        elif 50 <= reputation < 100:
+            return "Friendly"
+        else:
+            return "Honored"
 
     def gain_crafting_experience(self, exp: float):
         """"Gain crafting experience."""
@@ -640,13 +702,13 @@ class Character: # Player
         if weapon in [i[0] for i in self.inventory.contents]:
             if hand == 'right':
                 if self.right_hand:
-                    self.disequip_weapon(self.right_hand)
+                    self.unequip_weapon(self.right_hand)
                 self.right_hand = weapon
                 self.damage += weapon.damage
                 print(f"{weapon.name} equipped in right hand. Your damage: {self.damage}")
             elif hand == 'left':
                 if self.left_hand:
-                    self.disequip_weapon(self.left_hand)
+                    self.unequip_weapon(self.left_hand)
                 self.left_hand = weapon
                 self.damage += weapon.damage
                 print(f"{weapon.name} equipped in left hand. Your damage: {self.damage}")
@@ -684,15 +746,17 @@ class Character: # Player
         """Get reputation with a faction."""
         return self.reputation.get(faction, 0)
 
-    def disequip_weapon(self, weapon: Weapon):
-        """Disequip a weapon."""
+    def unequip_weapon(self, weapon: Weapon):
+        """unequip a weapon."""
         if weapon in [i[0] for i in self.inventory.contents]:
             if self.right_hand == weapon:
                 self.right_hand = None
                 self.damage -= weapon.damage
+                print(f"{weapon.name} unequipped from right hand.")
             elif self.left_hand == weapon:
                 self.left_hand = None
-                self.damage = weapon.damage
+                print(f"{weapon.name} unequipped from left hand.")
+                self.damage -= weapon.damage
             else:
                 print('Weapon not equipped')
                 print()
@@ -745,7 +809,7 @@ class Character: # Player
             if armor.slot == 'chest':
                 self.armor_chest = armor
                 if self.armor_chest and self.armor_chest != armor:
-                    self.disequip_armor(self.armor_chest)
+                    self.unequip_armor(self.armor_chest)
                 self.defense += armor.defense
                 if self.health == self.max_health:
                     self.health += armor.health
@@ -756,7 +820,7 @@ class Character: # Player
                 print()
             elif armor.slot == 'head':
                 if self.armor_head and self.armor_head != armor:
-                    self.disequip_armor(self.armor_head)
+                    self.unequip_armor(self.armor_head)
                 self.armor_head = armor
                 self.defense += armor.defense
                 if self.health == self.max_health:
@@ -768,7 +832,7 @@ class Character: # Player
                 print()
             elif armor.slot == 'legs':
                 if self.armor_legs and self.armor_legs != armor:
-                    self.disequip_armor(self.armor_legs)
+                    self.unequip_armor(self.armor_legs)
                 self.armor_legs = armor
                 self.defense += armor.defense
                 if self.health == self.max_health:
@@ -780,7 +844,7 @@ class Character: # Player
                 print()
             elif armor.slot == 'feet':
                 if self.armor_feet and self.armor_feet != armor:
-                    self.disequip_armor(self.armor_feet)
+                    self.unequip_armor(self.armor_feet)
                 self.armor_feet = armor
                 self.defense += armor.defense
                 if self.health == self.max_health:
@@ -812,8 +876,8 @@ class Character: # Player
             print(f" - {item.name}")
         print(f"Gold: {self.gold}")
 
-    def disequip_armor(self, armor: Armor):
-        """Disequip an armor."""
+    def unequip_armor(self, armor: Armor):
+        """unequip an armor."""
         if armor in [i[0] for i in self.inventory.contents]:
             if armor.character_class == self.character_class:
                 if self.armor_chest == armor:
@@ -824,7 +888,7 @@ class Character: # Player
                     self.max_health -= armor.health
                     self.strength -= armor.strength
                     self.agility -= armor.agility
-                    print(f'{armor.name} disequipped')
+                    print(f'{armor.name} unequipped')
                     print()
                 elif self.armor_head == armor:
                     self.armor_head = None
@@ -834,7 +898,7 @@ class Character: # Player
                     self.max_health -= armor.health
                     self.strength -= armor.strength
                     self.agility -= armor.agility
-                    print(f'{armor.name} disequipped')
+                    print(f'{armor.name} unequipped')
                     print()
                 elif self.armor_legs == armor:
                     self.armor_legs = None
@@ -844,7 +908,7 @@ class Character: # Player
                     self.max_health -= armor.health
                     self.strength -= armor.strength
                     self.agility -= armor.agility
-                    print(f'{armor.name} disequipped')
+                    print(f'{armor.name} unequipped')
                     print()
                 elif self.armor_feet == armor:
                     self.armor_feet = None
@@ -854,7 +918,7 @@ class Character: # Player
                     self.max_health -= armor.health
                     self.strength -= armor.strength
                     self.agility -= armor.agility
-                    print(f'{armor.name} disequipped')
+                    print(f'{armor.name} unequipped')
                     print()
                 else:
                     print('Armor not equipped')
@@ -879,14 +943,14 @@ class Character: # Player
                 if not self.left_hand:
                     print()
                 self.inventory.remove_item(self.right_hand)
-                self.disequip_weapon(self.right_hand)
+                self.unequip_weapon(self.right_hand)
         if self.left_hand:
             self.left_hand.durskill -= 1
             if self.left_hand.durskill <= 0:
                 print(f"{self.left_hand.name} has broken!")
                 print()
                 self.inventory.remove_item(self.left_hand)
-                self.disequip_weapon(self.left_hand)
+                self.unequip_weapon(self.left_hand)
 
         self.saturation -= 0.5
     def consume(self, item: Item):
@@ -896,7 +960,7 @@ class Character: # Player
         if item in [i[0] for i in self.inventory.contents]:
             try:
                 if item.item_type == 'Potion': # potion is a separate class but depends on Item
-                    if item.potion_type == 'Health':
+                    if item.potion_type == 'Heal':
                         self.health += item.value
                     elif item.potion_type == 'Strength':
                         self.strength += item.value
@@ -906,11 +970,20 @@ class Character: # Player
                         self.defense += item.value
                     elif item.potion_type == 'Mana':
                         self.mana += item.value
+                    else:
+                        print('Invalid potion type')
+                        return
                     if self.health > self.max_health:
                         self.health = self.max_health
                     if self.mana > self.max_mana:
                         self.mana = self.max_mana
                     print(f'{self.name} consumed {item.name} ({item.potion_type}). Health: {self.health}, Mana: {self.mana}')
+                    for i in range(len(self.inventory.contents)):
+                        if self.inventory.contents[i][0] == item:
+                            self.inventory.contents[i][1] -= 1
+                            if self.inventory.contents[i][1] == 0:
+                                del self.inventory.contents[i]
+                            break
                     print()
                 elif item.item_type == 'Food':
                     self.saturation += item.saturation
@@ -923,9 +996,6 @@ class Character: # Player
                     print()
             except AttributeError:
                 print('Consume: Invalid item')
-            else:
-                print('Consume: Invalid item')
-                print()
         else:
             print(f'{item.name} not found in inventory.')
             print()
@@ -964,6 +1034,7 @@ class Character: # Player
                 print(f'{self.name} died')
                 print()
                 self.die()
+                logger.render(10, SCREEN_HEIGHT - 200)
                 return True
         self.saturation -= 0.5
     def die(self):
@@ -984,11 +1055,11 @@ class Character: # Player
                 self.level = 1
                 self.experience = 0
         threading.Thread(target=self.respawn_after_delay).start()
+        logger.render(10, SCREEN_HEIGHT - 200)
 
     def respawn_after_delay(self):
-        """Respawn after a delay"""
-        sleep(self.respawn_time)  # Delay for respawn
-        self.respawn()
+        """Call respawn after a delay"""
+        sleep(self.respawn_time); self.respawn()
     def respawn(self):
         """Respawn."""
         self.health = self.max_health
@@ -1053,6 +1124,13 @@ class Character: # Player
             self.achievements.append(achievement_name)
             print(f"Achievement unlocked: {achievement_name}")
             print()
+
+    def draw_at(self, screen, position):
+        """Draw the character at a specific screen position."""
+        pygame.draw.rect(screen, self.color, (*position, 30, 30))
+        font = pygame.font.Font(None, 24)
+        text = font.render(self.name, True, BLACK)
+        screen.blit(text, (position[0], position[1] - 15))
 
 class Skill: # To not store skills in a tuple because it is inconvenient to use.
     def __init__(self, name: str, skill_type: str, value: float, cost: float):
@@ -1194,6 +1272,13 @@ class Mob: # Anything that can be killed.
                         if self.mana < 0:
                             self.mana = 0
                         return
+    def draw_at(self, screen, position):
+        """Draw the character at a specific screen position."""
+        if self.alive:
+            pygame.draw.rect(screen, self.color, (*position, 30, 30))
+            font = pygame.font.Font(None, 24)
+            text = font.render(self.name, True, BLACK)
+            screen.blit(text, (position[0], position[1] - 15))
 
 class WorldClock: # Do not used yet. Planning to add a day/night cycle with minor events.
     def __init__(self):
@@ -1223,42 +1308,31 @@ class NPC: # NPC with quests
         self.quests = quests
         self.x = x
         self.y = y
+        self.color = BLUE
 
     def interact(self, player: 'Character'):
         """Give a quest to the player."""
         for quest in self.quests:
             if quest in player.quests and quest.completed:
                 player.complete_quest(quest)
-            elif quest not in player.quests and quest not in player.completed_quests:
+            elif quest not in player.quests and quest not in player.completed_quests and quest.level <= player.level:
                 player.accept_quest(quest)
                 print(f"{self.name} has given the quest: '{quest.name}'.")
                 return
         print(f"{self.name} has no quests available for {player.name}.")
     def draw(self, screen):
-        pygame.draw.rect(screen, BLUE, (self.x, self.y, 30, 30))
+        pygame.draw.rect(screen, self.color, (self.x, self.y, 30, 30))
         font = pygame.font.Font(None, 24)
         text = font.render(self.name, True, (0, 0, 0))
         screen.blit(text, (self.x, self.y - 15))
 
-class Faction: # Do not used yet. Planning to add factions and influence with some unique buffs or debuffs.
-    def __init__(self, name: str, description: str='', leader: Character=None, members: list[Character]=[]):
-        self.name = name
-        self.description = description
-        self.leader = leader
-        self.members = members
-    def gain_influence(self, amount):
-        """Increase the faction's influence."""
-        self.influence += amount
-        if self.influence > 100:
-            self.influence = 100
-        print(f"{self.name}'s influence increased to {self.influence}.")
+    def draw_at(self, screen, position):
+        """Draw the character at a specific screen position."""
+        pygame.draw.rect(screen, self.color, (*position, 30, 30))
+        font = pygame.font.Font(None, 24)
+        text = font.render(self.name, True, BLACK)
+        screen.blit(text, (position[0], position[1] - 15))
 
-    def lose_influence(self, amount):
-        """Decrease the faction's influence."""
-        self.influence -= amount
-        if self.influence < 0:
-            self.influence = 0
-        print(f"{self.name}'s influence decreased to {self.influence}.")
 def display_notification(text, color, duration=2):
     """Display a temporary notification on the screen."""
     notification_font = pygame.font.Font(None, 36)
@@ -1271,22 +1345,29 @@ def sleep(duration): # Useless but exists.
     """Pause the game for a specified duration."""
     time.sleep(duration)
 
-
-class World: # World with cities, mobs, npcs, and events.
-    def __init__(self, name: str, cities: list[City], npcs: list[NPC], mobs: list[Mob]):
-        self.name = name
-        self.cities = cities
-        self.npcs = npcs
-        self.mobs = mobs
-        self.events = []  # Track world events
-
-    def log_event(self, event_type: str, details: dict):
-        """Log world events dynamically."""
-        self.events.append({"type": event_type, "details": details})
-        print(f"World Event Logged: {event_type} - {details}")
-
-def render_shop_menu(screen, shop, player):
+def render_shop_menu(screen, shop: Shop, player: Character):
     """Render the shop menu and handle player interaction."""
+    if shop.faction:
+        tier = player.get_reputation_tier(shop.faction)
+        if tier == "Hostile":
+            print(f"The {shop.faction.name} refuses to trade with you.")
+            return
+        elif tier == "Unfriendly":
+            print(f"The {shop.faction.name} imposes a 20% surcharge due to your poor reputation.")
+
+        # Apply discounts or penalties based on reputation tier
+        multiplier = 1.0
+        if tier == "Friendly":
+            multiplier = 0.9  # 10% discount
+        elif tier == "Unfriendly":
+            multiplier = 1.2  # 20% surcharge
+
+        print(f"Welcome to {shop.name}!" + (f"Prices adjusted for your reputation ({tier}).") if shop.faction else "")
+        for idx, item in enumerate(shop.items, start=1):
+            adjusted_price = int(getattr(item, 'price', 0) * multiplier)
+            print(f"{idx}. {item.name} - {adjusted_price} gold")
+
+        # Buying logic remains unchanged, just apply adjusted prices
     menu_font = pygame.font.Font(None, 36)
     title_font = pygame.font.Font(None, 48)
     running_shop = True
@@ -1295,7 +1376,7 @@ def render_shop_menu(screen, shop, player):
     while running_shop:
         # Fill the screen for the shop menu
         screen.fill(WHITE)
-
+        logger.render(10, SCREEN_HEIGHT - 200)
         # Render shop title
         title_text = title_font.render(f"Welcome to {shop.name}", True, BLACK)
         screen.blit(title_text, (50, 50))
@@ -1305,7 +1386,7 @@ def render_shop_menu(screen, shop, player):
         for i, item in enumerate(shop.items):
             color = BLACK if i != selected_item else RED  # Highlight selected item
             item_text = menu_font.render(
-                f"{item.name} - {item.quality} - {item.price} Gold", True, color
+                f"{item.name} - {item.quality} - {item.price * multiplier} Gold", True, color
             )
             screen.blit(item_text, (50, y_offset))
             y_offset += 40
@@ -1328,8 +1409,8 @@ def render_shop_menu(screen, shop, player):
                     selected_item = (selected_item - 1) % len(shop.items)  # Navigate up
                 elif event.key in [K_RETURN, K_RIGHT]:  # Buy selected item
                     item = shop.items[selected_item]
-                    if player.gold >= item.price:
-                        player.gold -= item.price
+                    if player.gold >= item.price * multiplier:
+                        player.gold -= item.price * multiplier
                         player.inventory.add_item(item)
                         print(f"You bought {item.name}!")
                     else:
@@ -1337,66 +1418,379 @@ def render_shop_menu(screen, shop, player):
                 elif event.key == K_ESCAPE:  # Exit the shop menu
                     running_shop = False
 
-def render_inventory_menu(screen, player: Character):
-    """Render the inventory menu and handle player interaction."""
-    menu_font = pygame.font.Font(None, 36)
-    title_font = pygame.font.Font(None, 48)
+def render_inventory_menu(screen, player: Character, page: int = 1, items_per_page: int = 5):
+    """
+    Render the inventory on the Pygame screen with pagination and item interaction.
+    """
     running_inventory = True
-    selected_item = 0  # Index of the currently selected item
+    selected_item = 0
 
     while running_inventory:
-        # Fill the screen for the inventory menu
+        # Clear screen
         screen.fill(WHITE)
+        logger.render(10, SCREEN_HEIGHT - 200)
+        # Inventory Header
+        font = pygame.font.Font(None, 36)
+        title = font.render(f"Inventory (Page {page})", True, BLACK)
+        screen.blit(title, (20, 20))
 
-        # Render inventory title
-        title_text = title_font.render("Inventory", True, BLACK)
-        screen.blit(title_text, (50, 50))
+        # Paginate items
+        items, total_pages = paginate_list(player.inventory.contents, items_per_page, page)
 
-        # Render inventory items
-        y_offset = 150
-        for i, item in enumerate(player.inventory.contents):
-            color = BLACK if i != selected_item else RED  # Highlight selected item
-            item_text = menu_font.render(
-                f"{item[0].name} - {item[0].quality} - {item[0].description}", True, color
-            )
-            screen.blit(item_text, (50, y_offset))
+        # Render items
+        item_font = pygame.font.Font(None, 28)
+        y_offset = 80
+        for idx, (item, quantity) in enumerate(items):
+            color = RED if idx == selected_item else BLACK
+            item_text = f"{item.name} x{quantity}"
+            text_surface = item_font.render(item_text, True, color)
+            screen.blit(text_surface, (40, y_offset))
             y_offset += 40
 
-        # Render player's gold
-        gold_text = menu_font.render(f"Gold: {player.gold}", True, BLACK)
-        screen.blit(gold_text, (50, y_offset + 20))
+        # Display navigation instructions
+        nav_text = font.render(
+            "[UP/DOWN to navigate, ENTER to use, Q to drop, LEFT to unequip, ESC to exit]",
+            True,
+            (128, 128, 128)
+        )
+        screen.blit(nav_text, (20, SCREEN_HEIGHT - 40))
+
+        # Display page navigation
+        page_nav_text = font.render(f"Page {page}/{total_pages}", True, (128, 128, 128))
+        screen.blit(page_nav_text, (SCREEN_WIDTH - 150, 20))
 
         pygame.display.flip()
 
+        # Event handling
         for event in pygame.event.get():
             if event.type == QUIT:
                 pygame.quit()
                 exit()
             elif event.type == KEYDOWN:
-                if event.key == K_DOWN:
-                    selected_item = (selected_item + 1) % len(player.inventory.contents)
-                elif event.key == K_UP:
-                    selected_item = (selected_item - 1) % len(player.inventory.contents)
-                elif event.key == K_RIGHT:  # Use selected item
-                    item = player.inventory.contents[selected_item][0]
-                    if issubclass(item.__class__, Weapon):
-                        print(f"Equipping {item.name}...")
-                        player.equip_weapon(item)
-                    elif issubclass(item.__class__, Armor):
-                        player.equip_armor(item)
-                    elif issubclass(item.__class__, Artifact):
-                        pass
-                    elif issubclass(item.__class__, Item):
-                        player.consume(item)
+                if event.key == K_UP:  # Navigate up in the list
+                    if len(player.inventory) > items_per_page:
+                        if selected_item == 0:
+                            page -= 1
+                            if page == 0:
+                                page = total_pages
+                            selected_item = items_per_page - 1 if page != total_pages else len(player.inventory) % page
+                        else:
+                            selected_item = (selected_item - 1) % len(items)
                     else:
-                        print("Unusable item!")
+                        selected_item -= 1
+                        if selected_item < 0:
+                            selected_item = len(items) - 1
+                elif event.key == K_DOWN:  # Navigate down in the list
+                    if len(player.inventory) > items_per_page:
+                        if selected_item == items_per_page - 1 or selected_item == len(player.inventory) % page and page == total_pages:
+                            page += 1
+                            if page > total_pages:
+                                page = 1
+                            selected_item = 0
+                        else:
+                            selected_item = (selected_item + 1) % len(items)
+                    else:
+                        selected_item += 1
+                        if selected_item >= len(items):
+                            selected_item = 0
+                elif event.key == K_RETURN:  # Use selected item (Enter key)
+                    if items:
+                        item = items[selected_item][0]
+                        if issubclass(item.__class__, Weapon):
+                            player.equip_weapon(item)
+                        elif issubclass(item.__class__, Armor):
+                            player.equip_armor(item)
+                        elif issubclass(item.__class__, Potion):
+                            player.consume(item)
+                        else:
+                            print("Cannot use this item.")
                 elif event.key == K_q:  # Drop selected item
-                    item = player.inventory.contents[selected_item][0]
-                    try:
-                        del player.inventory.contents[selected_item]
+                    if items:
+                        item = items[selected_item][0]
+                        player.inventory.remove_item(item)
                         print(f"Dropped {item.name}.")
-                    except IndexError:
-                        print("No item selected!")
-                    break
+                elif event.key == K_LEFT:  # Unequip selected item
+                    if items:
+                        item = items[selected_item][0]
+                        if issubclass(item.__class__, Weapon):
+                            player.unequip_weapon(item)
+                        elif issubclass(item.__class__, Armor):
+                            player.unequip_armor(item)
+                        else:
+                            print("Cannot unequip this item.")
                 elif event.key == K_ESCAPE:  # Exit the inventory menu
                     running_inventory = False
+
+def paginate_list(items: list, items_per_page: int, page: int):
+    """
+    Paginate a list into pages of a given size..
+    """
+    if not items:
+        return [], 1  # Return an empty page if no items exist
+
+    total_pages = (len(items) + items_per_page - 1) // items_per_page
+    start = (page - 1) * items_per_page
+    end = start + items_per_page
+    paginated_items = items[start:end]
+    return paginated_items, total_pages
+
+class TextLogger:
+    def __init__(self, screen, font, max_lines=6, line_height=20):
+        self.screen = screen
+        self.font = font
+        self.max_lines = max_lines
+        self.line_height = line_height
+        self.logs = []
+
+    def log(self, message, color=(0, 0, 0)):
+        """Add a new message to the logs."""
+        if len(self.logs) >= self.max_lines:
+            self.logs.pop(0)  # Remove the oldest log if exceeding max_lines
+        self.logs.append((message, color))
+
+    def render(self, x, y, clear_background=False):
+        """Render the text logs on the screen."""
+        if clear_background:
+            bg_width = self.screen.get_width()
+            bg_height = self.line_height * self.max_lines
+            pygame.draw.rect(self.screen, (255, 255, 255, 150), (x, y, bg_width, bg_height))  # Semi-transparent white
+
+        for i, (log, color) in enumerate(self.logs):
+            text_surface = self.font.render(log, True, color)
+            self.screen.blit(text_surface, (x, y + i * self.line_height))
+
+font = pygame.font.Font(None, 24)
+logger = TextLogger(screen, font)
+def display_print(*args, **kwargs):
+    message = " ".join(map(str, args))
+    color = kwargs.get("color", (0, 0, 0))  # Default color is black
+    logger.log(message, color)  # Log the message in the TextLogger
+
+# builtins.print = display_print
+
+class Camera:
+    def __init__(self, width, height):
+        self.width = width
+        self.height = height
+        self.offset_x = 0
+        self.offset_y = 0
+
+    def center_on(self, target):
+        """Center the camera on the target (usually the player)."""
+        self.offset_x = target.x - SCREEN_WIDTH // 2
+        self.offset_y = target.y - SCREEN_HEIGHT // 2
+
+    def apply(self, entity):
+        screen_x = max(0, min(entity.x - self.offset_x, SCREEN_WIDTH))
+        screen_y = max(0, min(entity.y - self.offset_y, SCREEN_HEIGHT))
+        return screen_x, screen_y
+
+
+# Updated Classes
+class Resource:
+    def __init__(self, x, y, resource_type, quantity):
+        self.x = x
+        self.y = y
+        self.resource_type = resource_type
+        self.quantity = quantity
+        self.respawn_time = 20  # Time when the resource will respawn
+        self.collected = False
+
+    def collect(self, player: Character):
+        """Simulate resource collection."""
+        if not self.collected:
+            print(f"Collected {self.quantity}x {self.type}!")
+            player.inventory.add_item(self.type, self.quantity)
+            self.collected = True
+            threading.Thread(target=self.respawn).start()
+
+    def respawn(self):
+        """Respawn the resource after a delay."""
+        pygame.time.set_timer(pygame.USEREVENT, self.respawn_time * 1000)
+
+
+
+class GameWorld:
+    def __init__(self, width, height, num_resources):
+        self.width = width
+        self.height = height
+        self.resources = []
+        self.generate_resources(num_resources)
+
+    def generate_resources(self, num_resources):
+        for _ in range(num_resources):
+            x = random.randint(0, self.width)
+            y = random.randint(0, self.height)
+            resource_type = random.choice(["Iron Ore", "Herbs", "Wood", "Water", "Gold"])
+            quantity = random.randint(1, 10)
+            resource = Resource(x, y, resource_type, quantity)
+            print(f"Generated resource: {resource.resource_type} at ({x}, {y})")  # Debug log
+            self.resources.append(resource)
+
+    def update_resources(self):
+        """Update the state of all resources (respawning if needed)."""
+        for resource in self.resources:
+            resource.respawn()
+
+    def draw_resources(self, screen, camera):
+        for resource in self.resources:
+            if not resource.collected:
+                screen_x, screen_y = camera.apply(resource)
+                print(f"Drawing resource at ({screen_x}, {screen_y})")  # Debug log
+                pygame.draw.circle(screen, (0, 255, 0), (screen_x, screen_y), 10)
+
+
+
+    def interact_with_resource(self, player_x, player_y, inventory):
+        """Allow the player to collect resources if they're nearby."""
+        for resource in self.resources:
+            if not resource.collected and abs(player_x - resource.x) < 10 and abs(player_y - resource.y) < 10:
+                resource.collect()
+                inventory.add_item(Item(resource.type), resource.quantity)
+
+
+
+
+GRAY = (128, 128, 128)
+
+# Drawing logic for the main game screen
+def draw_screen(screen, player, mobs, npcs, cities, camera, font, world):
+    """Draw all game entities on the main screen."""
+    # Fill the background
+    screen.fill(WHITE)
+    logger.render(10, SCREEN_HEIGHT - 200)
+    # Draw the world (e.g., regions)
+    world.draw(screen, camera)
+
+    # Draw player
+    if player.alive:
+        player_screen_pos = camera.apply(player)
+        player.draw_at(screen, player_screen_pos)
+
+    # Draw mobs
+    for mob in mobs:
+        if mob.alive:
+            mob_screen_pos = camera.apply(mob)
+            mob.draw_at(screen, mob_screen_pos)
+
+    # Draw NPCs
+    for npc in npcs:
+        npc_screen_pos = camera.apply(npc)
+        npc.draw_at(screen, npc_screen_pos)
+
+        # Display interaction prompt if the player is near
+        if abs(player.x - npc.x) < 50 and abs(player.y - npc.y) < 50:
+            npc_text = font.render(f"Press F to interact", True, BLACK)
+            screen.blit(npc_text, (npc_screen_pos[0], npc_screen_pos[1] - 30))
+
+    # Draw cities
+    for city in cities:
+        city_screen_pos = camera.apply(city)
+        city.draw_at(screen, city_screen_pos)
+
+        # Display interaction prompt if the player is near
+        if abs(player.x - city.x) < 50 and abs(player.y - city.y) < 50:
+            city_text = font.render(f"Press F to enter", True, BLACK)
+            screen.blit(city_text, (city_screen_pos[0] - 5, city_screen_pos[1] - 35))
+
+    # HUD - Health and Mana
+    health_text = font.render(f"Health: {player.health}/{player.max_health}", True, RED)
+    mana_text = font.render(f"Mana: {player.mana}/{player.max_mana}", True, BLUE)
+    screen.blit(health_text, (10, 10))
+    screen.blit(mana_text, (10, 50))
+
+    # Display active quest objectives
+    if player.active_quest:
+        if not player.active_quest.completed:
+            objective_text = font.render(
+                f"Objective: {player.active_quest.objectives[player.active_quest.current_objective]}",
+                True, BLACK
+            )
+            screen.blit(objective_text, (10, 90))
+        else:
+            completed_text = font.render("Quest Complete!", True, GREEN)
+            screen.blit(completed_text, (10, 90))
+
+
+# Minimap Drawing Logic
+def draw_dynamic_minimap(screen, player, mobs, npcs, cities, world, SCREEN_WIDTH, SCREEN_HEIGHT):
+    """
+    Draw a dynamic minimap showing the player's surroundings.
+    The minimap is centered on the player's position and only displays a portion of the world.
+    """
+    # Define the minimap size and scaling ratio
+    MINIMAP_SIZE = 150
+    SCALE_RATIO = world.world_width / MINIMAP_SIZE
+
+    # Create the minimap surface
+    minimap = pygame.Surface((MINIMAP_SIZE, MINIMAP_SIZE))
+    minimap.fill(BLACK)
+
+    # Calculate the player's position on the minimap
+    center_x = int(player.x / SCALE_RATIO)
+    center_y = int(player.y / SCALE_RATIO)
+
+    # Draw the player
+    pygame.draw.circle(minimap, GREEN, (MINIMAP_SIZE // 2, MINIMAP_SIZE // 2), 5)
+
+    # Draw nearby cities
+    for city in cities:
+        city_x = int(city.x / SCALE_RATIO)
+        city_y = int(city.y / SCALE_RATIO)
+        if abs(center_x - city_x) < MINIMAP_SIZE // 2 and abs(center_y - city_y) < MINIMAP_SIZE // 2:
+            draw_x = MINIMAP_SIZE // 2 + (city_x - center_x)
+            draw_y = MINIMAP_SIZE // 2 + (city_y - center_y)
+            pygame.draw.rect(minimap, BLUE, (draw_x, draw_y, 5, 5))  # City positions
+
+    # Draw nearby mobs
+    for mob in mobs:
+        if mob.alive:
+            mob_x = int(mob.x / SCALE_RATIO)
+            mob_y = int(mob.y / SCALE_RATIO)
+            if abs(center_x - mob_x) < MINIMAP_SIZE // 2 and abs(center_y - mob_y) < MINIMAP_SIZE // 2:
+                draw_x = MINIMAP_SIZE // 2 + (mob_x - center_x)
+                draw_y = MINIMAP_SIZE // 2 + (mob_y - center_y)
+                pygame.draw.circle(minimap, RED, (draw_x, draw_y), 3)  # Mob positions
+
+    # Draw nearby NPCs
+    for npc in npcs:
+        npc_x = int(npc.x / SCALE_RATIO)
+        npc_y = int(npc.y / SCALE_RATIO)
+        if abs(center_x - npc_x) < MINIMAP_SIZE // 2 and abs(center_y - npc_y) < MINIMAP_SIZE // 2:
+            draw_x = MINIMAP_SIZE // 2 + (npc_x - center_x)
+            draw_y = MINIMAP_SIZE // 2 + (npc_y - center_y)
+            pygame.draw.circle(minimap, BLUE, (draw_x, draw_y), 3)  # NPC positions
+
+    # Draw the minimap onto the screen at the top-right corner
+    screen.blit(minimap, (SCREEN_WIDTH - MINIMAP_SIZE - 20, 20))
+
+def create_static_background(world, regions, cities):
+    """Pre-render static elements of the world into a surface."""
+    background = pygame.Surface((world.world_width, world.world_height))
+    background.fill(WHITE)  # Background color for the world
+    
+    # Draw regions
+    for region in regions:
+        region.draw_at(background, (region.x, region.y))
+    
+    # Draw cities
+    for city in cities:
+        city.draw_at(background, (city.x, city.y))
+    
+    return background
+
+def is_within_view(camera: Camera, entity):
+    """Check if an entity is within the camera's visible area."""
+    # Get entity dimensions, default to 1x1 for points
+    entity_width = getattr(entity, 'width', 30)
+    entity_height = getattr(entity, 'height', 30)
+    
+    # Create entity rect in world coordinates
+    entity_rect = pygame.Rect(entity.x, entity.y, entity_width, entity_height)
+    
+    # Create camera rect using camera position and screen dimensions
+    camera_width = getattr(camera, 'width', SCREEN_WIDTH)
+    camera_height = getattr(camera, 'height', SCREEN_HEIGHT)
+    camera_rect = pygame.Rect(camera.offset_y, camera.offset_y, camera_width, camera_height)
+    
+    return entity_rect.colliderect(camera_rect)

@@ -1,31 +1,9 @@
 from classes import *
-# Create Player, Mob, Quest, world, and inventory
 
-quest1, quest2, quest3 = Quest(
-        name="Slay the Bandit Leader",
-        giver="Eldora, Warrior of the Warriors Order",
-        storyline="A dangerous bandit leader has been terrorizing the region. End his reign of terror.",
-        objectives=["Find the Bandit Camp", "Defeat the Bandit Leader"],
-        rewards=[Weapon(name='Bandit Leader\'s Axe', description='A powerful axe wielded by the bandit leader.', quality='Legendary', damage=100.0)],
-        reputation = 5,
-        gold = 100
-    ), Quest(
-        name="Recover the Lost Relic",
-        giver="Galen, Mage of the Mages Guild",
-        storyline="An ancient relic was stolen by thieves and must be recovered before it falls into the wrong hands.",
-        objectives=["Investigate the Theft", "Locate the Thieves' Hideout", "Recover the Relic"],
-        rewards=["200 Gold", "Mage's Favor"],
-    ), Quest(
-        name="Save the Trapped Miners",
-        giver="Ironhold Miner Guild",
-        storyline="A group of miners are trapped after a cave-in. Rescue them before supplies run out.",
-        objectives=["Enter the Collapsed Mines", "Clear the Rubble", "Escort the Miners to Safety"],
-        rewards=["300 Gold", "Free Access to Mines"],
-    )
-# quests = [
-#     quest1, quest2, quest3
-# ]
+# Create Camera
+camera = Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
 
+# Define recipes
 recipes = [
     Recipe(
         name="Iron Sword",
@@ -33,7 +11,7 @@ recipes = [
         result=Weapon(name="Iron Sword", description="A sturdy iron sword.", quality="Uncommon", damage=20),
         required_station="Forge",
         experience=100
-        ),
+    ),
     Recipe(
         name="Health Potion",
         ingredients=[(Item("Herbs"), 3), (Item("Water"), 1)],
@@ -43,187 +21,171 @@ recipes = [
     ),
 ]
 
-crafting_stations = [CraftingStation(name="Blacksmith Forge", station_type="Forge", x=300, y=300),
-    CraftingStation(name="Alchemy Table", station_type="Alchemy", x=500, y=500)
+# Define crafting stations
+crafting_stations = [
+    CraftingStation(name="Blacksmith Forge", station_type="Forge"),
+    CraftingStation(name="Alchemy Table", station_type="Alchemy")
 ]
-city1 = City(
-    name="Ironhold",
-    population=5000,
-    guards=200,
-    faction=Faction("Warriors Order"),
-    shops=[],
-    crafting_stations=crafting_stations,
-    x=300,
-    y=400
-)
 
+# Define factions
+guild_of_merchants = Faction(name="Guild of Merchants", description="A coalition of traders and shopkeepers.")
+dark_brotherhood = Faction(name="Dark Brotherhood", description="A secretive guild of assassins.", base_reputation=-10)
 
-mob = Mob("Library Guardian", x=200, y=200, health=30, max_health=30, damage=50, trigger=quests[0], loot=Item(name="Book of Knowledge", description="A book containing ancient knowledge.", quality="Legendary"))
+# Define player and inventory
+player = Character(name="Eldrin", inventory=None, character_class="Warrior", skills=[Skill('Fireball', 'damage', 100, 10)])
+player_inventory = Inventory(player, known_recipes=recipes)
+player.inventory = player_inventory
 
-# mob1, mob2, mob3, mob4 = Mob(name="Goblin Raider", health=50, damage=10, loot=Item('Goblin Spear'), level=3),Mob(name="Sand Wyrm", health=200, damage=25, loot=Item('Wyrm scale'), level=7),Mob(name="Forest Troll", health=300, damage=30, loot=Item("Troll Hide"), level=10),Mob(name="Dune Leviathan", health=1000, damage=50, loot=Item("Leviathan Claw"), level=20, is_boss=True, trigger=quest1),
-# mobs = [
-#     mob1, mob2, mob3, mob4
-# ]
-mobs = [mob, Mob(name="Goblin Raider", health=50, damage=10, loot=Item('Goblin Spear'), level=3, x=500, y=200)]
-
-# Example items
-health_potion = Item(name="Health Potion", description="Restores 50 health.", quality="Common", price=10)
-mana_potion = Item(name="Mana Potion", description="Restores 50 mana.", quality="Common", price=15)
-sword = Weapon(name="Steel Sword", description="A sharp steel blade.", quality="Uncommon", damage=25, price=50)
-
-# Example shops
-potion_shop = Shop(name="Potion Shop", items=[health_potion, mana_potion])
-weapon_shop = Shop(name="Weapon Shop", items=[sword])
-city1 = City(
-    name="Ironhold",
-    population=5000,
-    guards=200,
-    crafting_stations=crafting_stations,
-    x=300,
-    y=400,
-    faction=Faction("Warriors Order"),
-    shops=[potion_shop, weapon_shop]
-)
-
-cities = [city1]
-
-npcs = [
-    NPC(name="Max", quests=[quest1], x=300, y=300),
-    NPC(name="Eldora", quests=[quest2], x=400, y=400)
-]
-player = Character("Eldrin",  None,'Warrior', skills=[Skill('Fireball', 'damage', 100, 10)])
-inventory = Inventory(player, known_recipes=recipes)
-player.inventory = inventory
+# Add items and recipes to inventory
 player.inventory.add_recipe(recipes[0])
 player.inventory.add_recipe(recipes[1])
 player.inventory.add_item(Item("Wood"), 10)
 player.inventory.add_item(Item("Iron Ore"), 10)
-npcs.append(NPC("Galen", quests=[quests[0]], x=500, y=500))
-world = World('Eldoria', cities, npcs, mobs)
+
+# Define mobs
+mobs = [
+    Mob(
+        name="Library Guardian", x=200, y=200, health=30, max_health=30, damage=50,
+        trigger=Quest(
+            name="Rescue the Merchant", giver="Elder Doran", storyline="Rescue the merchant captured by bandits.",
+            objectives=["Defeat the bandits", "Rescue the merchant"],
+            rewards=[Item(name="Book of Knowledge", description="Contains ancient knowledge.", quality="Legendary")],
+            faction_rewards={"Guild of Merchants": 30}
+        ),
+        loot=Item(name="Book of Knowledge", description="A book containing ancient knowledge.", quality="Legendary")
+    ),
+    Mob(name="Goblin Raider", health=50, damage=10, loot=Item('Goblin Spear'), level=3, x=500, y=200)
+]
+
+# Define cities
+cities = [
+    City(
+        name="Ironhold", population=5000, guards=200, faction=guild_of_merchants,
+        shops=[Shop(name="Merchant's Haven", items=[Item('Oak Wood', price=10), Potion('Mana potion', potion_type='Mana', price=15), Potion('Health Potion', price=15),], faction=guild_of_merchants)],
+        crafting_stations=crafting_stations, x=300, y=400
+    )
+]
+
+# Define NPCs
+npcs = [
+    NPC(name="Eldora", quests=[], x=400, y=400),
+    NPC(name="Galen", quests=[mobs[0].trigger], x=500, y=500)
+]
+
+# Define world
+world = GameWorld(width=2000, height=2000, num_resources=20)
+
+# Adjust player reputation
+player.adjust_reputation(guild_of_merchants, 50)
+player.adjust_reputation(dark_brotherhood, -15)
+
+
+# Main Game Loop
 running = True
 while running:
-    screen.fill(WHITE)
-    font = pygame.font.Font(None, 36)
-    # Event Handling
-    for event in pygame.event.get():
-        if event.type == QUIT:
-            running = False
-        elif event.type == KEYDOWN:
-            if player.alive:
-                for mob in mobs:
-                    if abs(player.x - mob.x) < 50 and abs(player.y - mob.y) < 50:
-                        if event.key == K_1:  # Special ability key
-                            if len(player.skills) > 0:
-                                player.use_skill(player.skills[0], mob)
-                        if event.key == K_2:  # Special ability key
-                            if len(player.skills) > 1:
-                                player.use_skill(player.skills[1], mob)
-                        if event.key == K_3:  # Special ability key
-                            if len(player.skills) > 2:
-                                player.use_skill(player.skills[2], mob)
-                        if event.key == K_4:  # Special ability key
-                            if len(player.skills) > 3:
-                                player.use_skill(player.skills[3], mob)
-                        if event.key == K_5:  # Special ability key
-                            if len(player.skills) > 4:
-                                player.use_skill(player.skills[4], mob)
-                        if event.key == K_SPACE and player.alive:
-                            player.attack(mob)
-                if event.type == KEYDOWN and event.key == K_i:
+    screen.fill(WHITE)  # Clear the screen
+
+    # try:
+        # Handle events
+    if player.alive and not player.resting:
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                running = False
+            elif event.type == KEYDOWN:
+                # Open inventory
+                if event.key == K_e:
                     render_inventory_menu(screen, player)
-                for npc in npcs:
-                    if abs(player.x - npc.x) < 50 and abs(player.y - npc.y) < 50:
-                        if event.type == KEYDOWN and event.key == K_e:
-                            npc.interact(player)
-                            print(*[(quest.name, quest.completed) for quest in player.quests])
-                for city in cities:
-                    if abs(player.x - city.x) < 50 and abs(player.y - city.y) < 50:
-                        if event.type == KEYDOWN and event.key == K_e:
+                # Display active quests
+                elif event.key == K_q:
+                    print("Quests:")
+                    for quest in player.quests:
+                        print(f" - {quest.name}")
+                # Attack nearby mobs
+                elif event.key == K_SPACE:
+                    for mob in mobs:
+                        if abs(player.x - mob.x) < 50 and abs(player.y - mob.y) < 50:
+                            player.attack(mob)
+                # Interact with cities and NPCs
+                elif event.key == K_f:
+                    # Interact with cities
+                    for city in cities:
+                        if abs(player.x - city.x) < 50 and abs(player.y - city.y) < 50:
                             city.enter(player, screen)
-                if event.key == K_r:
-                    player.rest(5)
-            if event.key == K_q:
-                print("Quests:")
-                for quest in player.quests:
-                    print(f" - {quest.name}")
+                    # Interact with NPCs
+                    for npc in npcs:
+                        if abs(player.x - npc.x) < 50 and abs(player.y - npc.y) < 50:
+                            npc.interact(player)
+                    # Interact with resources
+                    for resource in world.resources:
+                        if abs(player.x - resource.x) < 50 and abs(player.y - resource.y) < 50:
+                            player.collect_resource(resource)
 
-    # Player Movement
-    keys = pygame.key.get_pressed()
-    if player.alive and not player.resting:  # Only allow movement if the player is alive and not resting
+    # Handle player movement
+    if player.alive and not player.resting:
+        keys = pygame.key.get_pressed()
         player.move(keys)
-    # Draw Entities (only alive ones will be drawn)
-    player.draw(screen)
+        camera.center_on(player)  # Center the camera on the player
+
+        # Draw player
+        screen_x, screen_y = camera.apply(player)
+
+        # Check if the player is within screen bounds
+
+        pygame.draw.rect(screen, player.color, (screen_x, screen_y, 30, 30))  # Green square for the player
+
+        font = pygame.font.Font(None, 24)
+        name_surface = font.render(player.name, True, BLACK)
+        screen.blit(name_surface, (screen_x, screen_y - 20))  # Render player name above
+
+    for entity in mobs + npcs:
+        # if is_within_view(camera, entity):
+        screen_x, screen_y = camera.apply(entity)
+        # Render entity using screen coordinates
+        entity.draw_at(screen, (screen_x, screen_y))
+
+
+    # Draw resources
+    for resource in world.resources:  # Limit to first 5 resources
+        if not resource.collected:
+            res_x, res_y = camera.apply(resource)
+
+            # Check if resource is within screen bounds
+            # if 0 <= res_x <= SCREEN_WIDTH and 0 <= res_y <= SCREEN_HEIGHT:
+            pygame.draw.circle(screen, (0, 255, 0), (res_x, res_y), 10)  # Green circle for resources
+
+            # Display resource name above the resource
+            resource_name_surface = font.render(f"{resource.resource_type} ({resource.quantity})", True, BLACK)
+            screen.blit(resource_name_surface, (res_x, res_y - 20))
+
+    # Display interaction tooltip
+    tooltip = None
     for mob in mobs:
-        mob.draw(screen)
+        if abs(player.x - mob.x) < 50 and abs(player.y - mob.y) < 50:
+            tooltip = f"Press SPACE to attack {mob.name}"
     for npc in npcs:
-        npc.draw(screen)
         if abs(player.x - npc.x) < 50 and abs(player.y - npc.y) < 50:
-            npc_font = pygame.font.Font(None, 24)
-            text = npc_font.render(npc.name, True, (0, 0, 0))
-            npc_text = npc_font.render(f"Press E to interact", True, BLACK)
-            screen.blit(npc_text, (npc.x, npc.y - 30))
+            tooltip = f"Press F to talk to {npc.name}"
     for city in cities:
-        city.draw(screen)
         if abs(player.x - city.x) < 50 and abs(player.y - city.y) < 50:
-            city_font = pygame.font.Font(None, 24)
-            city_text = city_font.render(f"Press E to enter", True, BLACK)
-            screen.blit(city_text, (city.x - 5, city.y - 35))
+            tooltip = f"Press F to enter {city.name}"
+    for resource in world.resources:  # Check first 5 resources
+        if not resource.collected and abs(player.x - resource.x) < 50 and abs(player.y - resource.y) < 50:
+            tooltip = f"Press F to collect {resource.resource_type}"
 
-            # Check for city interaction
-            for event in pygame.event.get():
-                if event.type == KEYDOWN and event.key == K_e:
-                    city.enter(player, screen)
+    # Render tooltip if applicable
+    if tooltip:
+        tooltip_surface = font.render(tooltip, True, BLACK)
+        screen.blit(tooltip_surface, (10, SCREEN_HEIGHT - 40))  # Show tooltip at the bottom of the screen
 
-    # Display Quest Info
-    if player.quests:
-        quest_text = font.render(f"Quest: {player.active_quest.name}", True, BLACK)
-        screen.blit(quest_text, (10, 10))
-    
-    if not player.alive:
-        display_notification(f"{player.name} has died!", RED)
+    # Render logger messages
+    logger.render(10, SCREEN_HEIGHT - 200)
 
-
-    if player.active_quest:
-        if not player.active_quest.completed:
-            objective_text = font.render(
-                f"Objective: {player.active_quest.objectives[player.active_quest.current_objective]}",
-                True, BLACK
-            )
-            screen.blit(objective_text, (10, 50))
-        else:
-            completed_text = font.render("Quest Complete!", True, GREEN)
-            screen.blit(completed_text, (10, 50))
-
-    
-    health_text = font.render(f"Health: {player.health}/{player.max_health}", True, RED)
-    mana_text = font.render(f"Mana: {player.mana}/{player.max_mana}", True, BLUE)
-    screen.blit(health_text, (10, 90))
-    screen.blit(mana_text, (10, 130))
-    # Draw the minimap on the main screen
-    minimap = pygame.Surface((150, 150))
-    minimap.fill(BLACK)
-
-    # Scale down positions for minimap (10:1 ratio)
-    pygame.draw.circle(minimap, GREEN, (player.x // 10, player.y // 10), 5)  # Player position
-    for city in cities:
-        pygame.draw.circle(minimap, BLUE, (city.x // 10, city.y // 10), 5)  # Cities
-    for mob in mobs:
-        if mob.alive:
-            pygame.draw.circle(minimap, RED, (mob.x // 10, mob.y // 10), 5)  # Mobs
-    for npc in npcs:
-        pygame.draw.circle(minimap, BLUE, (npc.x // 10, npc.y // 10), 5)  # NPCs
-
-    # Display the minimap
-    screen.blit(minimap, (SCREEN_WIDTH - 170, 20))
-
-
-    for mob in mobs:
-        if random.random() < 0.0001:  # 0.01% chance per tick
-            mob.migrate()
-
-
-    # Update Screen
+    # Update the display
     pygame.display.flip()
-    clock.tick(60)
+    clock.tick(60)  # Limit to 60 FPS
+
+    # except Exception as e:
+    #     print(f"Error occurred: {e}")
+    #     running = False
 
 pygame.quit()
