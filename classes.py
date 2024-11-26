@@ -1272,13 +1272,15 @@ class Mob: # Anything that can be killed.
                         if self.mana < 0:
                             self.mana = 0
                         return
+
     def draw_at(self, screen, position):
-        """Draw the character at a specific screen position."""
+        """Draw the mob at a specific screen position."""
         if self.alive:
             pygame.draw.rect(screen, self.color, (*position, 30, 30))
             font = pygame.font.Font(None, 24)
             text = font.render(self.name, True, BLACK)
             screen.blit(text, (position[0], position[1] - 15))
+
 
 class WorldClock: # Do not used yet. Planning to add a day/night cycle with minor events.
     def __init__(self):
@@ -1580,6 +1582,7 @@ class Camera:
         self.offset_x = target.x - SCREEN_WIDTH // 2
         self.offset_y = target.y - SCREEN_HEIGHT // 2
 
+
     def apply(self, entity):
         screen_x = max(0, min(entity.x - self.offset_x, SCREEN_WIDTH))
         screen_y = max(0, min(entity.y - self.offset_y, SCREEN_HEIGHT))
@@ -1647,6 +1650,94 @@ class GameWorld:
             if not resource.collected and abs(player_x - resource.x) < 10 and abs(player_y - resource.y) < 10:
                 resource.collect()
                 inventory.add_item(Item(resource.type), resource.quantity)
+
+
+
+
+
+
+
+# Create Camera
+camera = Camera(SCREEN_WIDTH, SCREEN_HEIGHT)
+
+# Define recipes
+recipes = [
+    Recipe(
+        name="Iron Sword",
+        ingredients=[(Item("Iron Ore"), 3), (Item("Wood"), 2)],
+        result=Weapon(name="Iron Sword", description="A sturdy iron sword.", quality="Uncommon", damage=20),
+        required_station="Forge",
+        experience=100
+    ),
+    Recipe(
+        name="Health Potion",
+        ingredients=[(Item("Herbs"), 3), (Item("Water"), 1)],
+        result=Potion(name="Health Potion", description="Restores health.", quality="Common", potion_type="Heal", value=30),
+        required_station="Alchemy",
+        experience=50
+    ),
+]
+
+# Define crafting stations
+crafting_stations = [
+    CraftingStation(name="Blacksmith Forge", station_type="Forge"),
+    CraftingStation(name="Alchemy Table", station_type="Alchemy")
+]
+
+# Define factions
+guild_of_merchants = Faction(name="Guild of Merchants", description="A coalition of traders and shopkeepers.")
+dark_brotherhood = Faction(name="Dark Brotherhood", description="A secretive guild of assassins.", base_reputation=-10)
+
+# Define player and inventory
+player = Character(name="Eldrin", inventory=None, character_class="Warrior", skills=[Skill('Fireball', 'damage', 100, 10)])
+player_inventory = Inventory(player, known_recipes=recipes)
+player.inventory = player_inventory
+
+# Add items and recipes to inventory
+player.inventory.add_recipe(recipes[0])
+player.inventory.add_recipe(recipes[1])
+player.inventory.add_item(Item("Wood"), 10)
+player.inventory.add_item(Item("Iron Ore"), 10)
+
+# Define mobs
+mobs = [
+    Mob(
+        name="Library Guardian", x=200, y=200, health=30, max_health=30, damage=50,
+        trigger=Quest(
+            name="Rescue the Merchant", giver="Elder Doran", storyline="Rescue the merchant captured by bandits.",
+            objectives=["Defeat the bandits", "Rescue the merchant"],
+            rewards=[Item(name="Book of Knowledge", description="Contains ancient knowledge.", quality="Legendary")],
+            faction_rewards={"Guild of Merchants": 30}
+        ),
+        loot=Item(name="Book of Knowledge", description="A book containing ancient knowledge.", quality="Legendary")
+    ),
+    Mob(name="Goblin Raider", health=50, damage=10, loot=Item('Goblin Spear'), level=3, x=500, y=200)
+]
+
+# Define cities
+cities = [
+    City(
+        name="Ironhold", population=5000, guards=200, faction=guild_of_merchants,
+        shops=[Shop(name="Merchant's Haven", items=[Item('Oak Wood', price=10), Potion('Mana potion', potion_type='Mana', price=15), Potion('Health Potion', price=15),], faction=guild_of_merchants)],
+        crafting_stations=crafting_stations, x=300, y=400
+    )
+]
+
+
+# Define NPCs
+npcs = [
+    NPC(name="Eldora", quests=[], x=400, y=400),
+    NPC(name="Galen", quests=[mobs[0].trigger], x=500, y=500)
+]
+
+# Define world
+world = GameWorld(width=2000, height=2000, num_resources=20)
+
+# Adjust player reputation
+player.adjust_reputation(guild_of_merchants, 50)
+player.adjust_reputation(dark_brotherhood, -15)
+
+
 
 
 
@@ -1794,3 +1885,186 @@ def is_within_view(camera: Camera, entity):
     camera_rect = pygame.Rect(camera.offset_y, camera.offset_y, camera_width, camera_height)
     
     return entity_rect.colliderect(camera_rect)
+
+def draw_minimap(screen, world, player, mobs, cities, resources):
+    """
+    Draw a dynamic minimap centered on the player,  showing nearby entities.
+    """
+    # Define minimap size and position
+    minimap_width, minimap_height = 200, 200
+    minimap_x, minimap_y = SCREEN_WIDTH - minimap_width - 20, 20  # Top-right corner
+
+    # Create the minimap surface
+    minimap = pygame.Surface((minimap_width, minimap_height))
+    minimap.fill((0, 0, 0))  # Black background
+
+    # Calculate scaling factors
+    scale_x = minimap_width / 1000  # Display a 1000x1000 area around the player
+    scale_y = minimap_height / 1000
+
+    # Calculate the player's position on the minimap (centered)
+    player_minimap_x = minimap_width // 2
+    player_minimap_y = minimap_height // 2
+    pygame.draw.circle(minimap, (0, 255, 0), (player_minimap_x, player_minimap_y), 5)  # Green for player
+
+    # Draw cities relative to the player
+    for city in cities:
+        city_dx = (city.x - player.x) * scale_x
+        city_dy = (city.y - player.y) * scale_y
+        city_minimap_x = int(player_minimap_x + city_dx)
+        city_minimap_y = int(player_minimap_y + city_dy)
+
+        # Only draw cities within the minimap bounds
+        if 0 <= city_minimap_x <= minimap_width and 0 <= city_minimap_y <= minimap_height:
+            pygame.draw.rect(minimap, (0, 0, 255), (city_minimap_x - 2, city_minimap_y - 2, 5, 5))  # Blue for cities
+
+    # Draw mobs relative to the player
+    for mob in mobs:
+        if mob.alive:
+            mob_dx = (mob.x - player.x) * scale_x
+            mob_dy = (mob.y - player.y) * scale_y
+            mob_minimap_x = int(player_minimap_x + mob_dx)
+            mob_minimap_y = int(player_minimap_y + mob_dy)
+
+        # Only draw mobs within the minimap bounds
+        if 0 <= mob_minimap_x <= minimap_width and 0 <= mob_minimap_y <= minimap_height:
+            pygame.draw.circle(minimap, (255, 0, 0), (mob_minimap_x, mob_minimap_y), 3)  # Red for mobs
+
+# Draw resources relative to the player
+    for resource in resources:
+        if not resource.collected:
+            res_dx = (resource.x - player.x) * scale_x
+            res_dy = (resource.y - player.y) * scale_y
+            res_minimap_x = int(player_minimap_x + res_dx)
+            res_minimap_y = int(player_minimap_y + res_dy)
+
+            # Only draw resources within the minimap bounds
+            if 0 <= res_minimap_x <= minimap_width and 0 <= res_minimap_y <= minimap_height:
+                pygame.draw.circle(minimap, (255, 255, 0), (res_minimap_x, res_minimap_y), 3)  # Yellow for resources
+
+        # Blit the minimap onto the main screen
+    screen.blit(minimap, (minimap_x, minimap_y))
+
+def generate_random_mob(world_width: int, world_height: int) -> Mob:
+    """
+    Generate a random mob with randomized attributes and position within the world bounds.
+    """
+    mob_names = ["Goblin", "Orc", "Wolf", "Bandit", "Troll"]
+    loot_items = [
+        Item(name="Gold Coin", description="A shiny coin.", quality="Common"),
+        Item(name="Iron Ore", description="A chunk of iron.", quality="Common"),
+        Weapon(name="Rusty Sword", description="A dull, rusty sword.", quality="Uncommon", damage=10),
+    ]
+
+    name = random.choice(mob_names)
+    health = random.randint(30, 100)
+    damage = random.randint(5, 20)
+    loot = random.choice(loot_items)
+    level = random.randint(1, 10)
+
+    # Random position within world bounds
+    x = random.randint(0, world_width)
+    y = random.randint(0, world_height)
+
+    return Mob(name=name, health=health, damage=damage, loot=loot, level=level, x=x, y=y)
+
+def generate_random_city(world_width: int, world_height: int, factions: list[Faction], crafting_stations: list[CraftingStation]) -> City:
+    """
+    Generate a random city with randomized attributes and position.
+    """
+    city_names = ["Ironhold", "Silverpeak", "Oakvale", "Rivermouth", "Sunspire"]
+    shop_items = [
+        Item(name="Health Potion", description="Restores health.", quality="Common", price=10),
+        Weapon(name="Steel Sword", description="A sharp blade.", quality="Uncommon", damage=25, price=50),
+        Armor(name="Leather Armor", description="Basic protection.", quality="Common", defense=5, price=30)
+    ]
+
+    name = random.choice(city_names)
+    population = random.randint(500, 5000)
+    guards = random.randint(50, 500)
+
+    # Randomly assign a faction
+    faction = random.choice(factions)
+
+    # Generate random shops
+    shops = [
+        Shop(
+            name=f"{name} General Store",
+            items=random.sample(shop_items, random.randint(1, 3)),
+            faction=faction
+        )
+    ]
+
+    # Add crafting stations
+    city_crafting_stations = random.sample(crafting_stations, random.randint(1, len(crafting_stations)))
+
+    # Random position within world bounds
+    x = random.randint(0, world_width)
+    y = random.randint(0, world_height)
+
+    return City(name=name, population=population, guards=guards, faction=faction, shops=shops, crafting_stations=city_crafting_stations, x=x, y=y)
+
+
+
+
+
+
+for _ in range(5):
+    cities.append(generate_random_city(5000, 5000, [guild_of_merchants, dark_brotherhood], crafting_stations))
+
+for _ in range(10):
+    mobs.append(generate_random_mob(5000, 5000))
+
+
+show_full_map = False  # Boolean to track the map view state
+
+def draw_full_world_map(screen, world: GameWorld, player: Character, mobs: list[Mob], cities: list[City], resources: list[Resource]):
+    """
+    Draw the full world map, showing all regions, cities, mobs, and resources.
+    """
+    # Define full map size and position
+    map_width, map_height = 400, 400  # Full map dimensions
+    map_x, map_y = (SCREEN_WIDTH - map_width) // 2, (SCREEN_HEIGHT - map_height) // 2  # Center on screen
+
+    # Create the full map surface
+    world_map = pygame.Surface((map_width, map_height))
+    world_map.fill((0, 0, 0))  # Black background
+
+    # Calculate scaling factors
+    scale_x = map_width / world.width
+    scale_y = map_height / world.height
+
+    # Draw cities
+    for city in cities:
+        city_map_x = int(city.x * scale_x)
+        city_map_y = int(city.y * scale_y)
+        pygame.draw.rect(world_map, (0, 0, 255), (city_map_x - 2, city_map_y - 2, 5, 5))  # Blue for cities
+
+    # Draw mobs
+    for mob in mobs:
+        if mob.alive:
+            mob_map_x = int(mob.x * scale_x)
+            mob_map_y = int(mob.y * scale_y)
+            pygame.draw.circle(world_map, (255, 0, 0), (mob_map_x, mob_map_y), 3)  # Red for mobs
+
+    # Draw resources
+    for resource in resources:
+        if not resource.collected:
+            resource_map_x = int(resource.x * scale_x)
+            resource_map_y = int(resource.y * scale_y)
+            pygame.draw.circle(world_map, (255, 255, 0), (resource_map_x, resource_map_y), 2)  # Yellow for resources
+    for npc in npcs:
+        npc_map_x = int(npc.x * scale_x)
+        npc_map_y = int(npc.y * scale_y)
+        pygame.draw.rect(world_map, (0, 0, 255), (npc_map_x, npc_map_y, 3, 3))  # Blue for npcs
+
+    # Draw the player's position
+    player_map_x = int(player.x * scale_x)
+    player_map_y = int(player.y * scale_y)
+    pygame.draw.rect(world_map, (0, 255, 0), (player_map_x, player_map_y, 5, 5))  # Green for player
+
+    # Blit the full map onto the main screen
+    screen.blit(world_map, (map_x, map_y))
+
+    # Optional: Add a border and title for the map
+    pygame.draw.rect
