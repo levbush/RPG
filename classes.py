@@ -594,20 +594,10 @@ class Character: # Player
     
     def collect_resource(self, resource: 'Resource'):
         """Collect a resource and add it to the player's inventory."""
-        if len(self.inventory.contents) < self.inventory.capacity:
-            print(f"{self.name} collected {resource.resource_type}.")
-            self.inventory.add_item(Item(name=resource.resource_type, quality=resource.quantity))
-            resource.collected = True
-            threading.Thread(target=resource.respawn).start()
-        elif resource.resource_type in [i[0].name for i in self.inventory.contents]:
-            for i in range(len(self.inventory)):
-                if self.inventory.contents[i][0].name == resource.resource_type:
-                    self.inventory.contents[i][1] += 1
-            print(f"{self.name} collected {resource.resource_type}.")
-            resource.collected = True
-            threading.Thread(target=resource.respawn).start()
-        else:
-            print('Not enough space in inventory')
+        print(f"{self.name} collected {resource.resource_type}.")
+        self.inventory.add_item(Item(name=resource.resource_type, quality=resource.quality), resource.quantity)
+        resource.collected = True
+        threading.Thread(target=resource.respawn).start()
 
     def draw(self, screen):
         """Draw the character on the screen."""
@@ -1589,28 +1579,20 @@ class Camera:
         return screen_x, screen_y
 
 
-# Updated Classes
 class Resource:
-    def __init__(self, x, y, resource_type, quantity):
+    def __init__(self, x, y, resource_type, quality, quantity=1):
         self.x = x
         self.y = y
         self.resource_type = resource_type
-        self.quantity = quantity
-        self.respawn_time = 20  # Time when the resource will respawn
+        self.quality = quality
+        self.respawn_time = 20
         self.collected = False
-
-    def collect(self, player: Character):
-        """Simulate resource collection."""
-        if not self.collected:
-            print(f"Collected {self.quantity}x {self.type}!")
-            player.inventory.add_item(self.type, self.quantity)
-            self.collected = True
-            threading.Thread(target=self.respawn).start()
+        self.quantity = quantity
 
     def respawn(self):
         """Respawn the resource after a delay."""
-        pygame.time.set_timer(pygame.USEREVENT, self.respawn_time * 1000)
-
+        sleep(self.respawn_time)
+        self.collected = False
 
 
 class GameWorld:
@@ -1626,8 +1608,7 @@ class GameWorld:
             y = random.randint(0, self.height)
             resource_type = random.choice(["Iron Ore", "Herbs", "Wood", "Water", "Gold"])
             quantity = random.randint(1, 10)
-            resource = Resource(x, y, resource_type, quantity)
-            print(f"Generated resource: {resource.resource_type} at ({x}, {y})")  # Debug log
+            resource = Resource(x=x, y=y, resource_type=resource_type, quantity=quantity, quality='Common')
             self.resources.append(resource)
 
     def update_resources(self):
