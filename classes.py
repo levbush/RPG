@@ -1,14 +1,28 @@
 from random import randint
 from dataclasses import dataclass
-import pygame
+import pygame, threading, time, random, builtins, sqlite3, json, sys
 from pygame.locals import *
-import threading
-import time
-import random
-# from collections import defaultdict
-import builtins
 
 
+# Database
+conn = sqlite3.connect('game.db')
+cursor = conn.cursor()
+cursor.execute('''
+    CREATE TABLE IF NOT EXISTS players (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT UNIQUE NOT NULL,
+    character_class TEXT NOT NULL,
+    health REAL NOT NULL,
+    level INTEGER NOT NULL,
+    experience REAL NOT NULL,
+    mana REAL NOT NULL,
+    gold INTEGER NOT NULL,
+    inventory TEXT -- JSON string
+);''')
+conn.commit()
+conn.close()
+
+# Game
 pygame.init()
 SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -19,6 +33,7 @@ BLACK = (0, 0, 0)
 RED = (255, 0, 0)
 GREEN = (0, 255, 0)
 BLUE = (0, 0, 255)
+YELLOW = (255, 255, 0)
 
 clock = pygame.time.Clock()
 
@@ -28,7 +43,7 @@ clock = pygame.time.Clock()
 
 
 
-
+# Classes
 class Faction:
     def __init__(self, name: str, description: str='', leader: 'Character'=None, members: list['Character']=[], base_reputation: int=0, influence: int=0):
         self.name = name
@@ -78,7 +93,7 @@ class Artifact(Item):
 class Weapon(Item):
     character_class: str = 'Warrior'
     damage: float = 10.0
-    durskill: float = 100.0
+    durability: float = 100.0
     quality: str = 'Common'
     weapon_type: str = 'Weapon'
 
@@ -100,7 +115,7 @@ class Armor(Item):
     health: float = 20.0
     agility: float = -5.0
     strength: float = 10.0
-    durskill: float = 100.0
+    durability: float = 100.0
     quality: str = 'Common'
     slot: str = 'chest'
 
@@ -398,7 +413,7 @@ class Recipe:
         self.experience = experience
 
 class Inventory:
-    def __init__(self, player: 'Character'=None, name: str='Inventory', capacity: int=20, contents: list[tuple[Item, int]]=[], known_recipes: list[Recipe]=[]):
+    def __init__(self, player: 'Character'=None, name: str='Inventory', capacity: int=20, contents: list[list[Item, int]]=[], known_recipes: list[Recipe]=[]):
         self.name = name
         self.player = player
         self.capacity = capacity
@@ -410,10 +425,10 @@ class Inventory:
         if recipe not in self.known_recipes:
             self.known_recipes.append(recipe)
             print(f'New recipe discovered: {recipe.result.name}')
-            print()
+            
         else:
             print(f'Recipe for {recipe.result.name} already known.')
-            print()
+            
     # def check_crafting_requirements(self, requirements: dict, player: 'Character') -> bool:
     #     """Check if the player meets the requirements to craft an item."""
     #     for stat, value in requirements.items():
@@ -436,7 +451,7 @@ class Inventory:
         # elif all(q in ("Epic", "Legendary") for q in material_quality):
         #     return "Epic"
         # elif all(q in ("Rare", "Epic", "Legendary") for q in material_quality):
-        #     return "Rare" if any(q == "Rare" for q in material_quality) else "Epic"
+        #     return "Rare"if any(q == "Rare" for q in material_quality) else "Epic"
         # return "Common"
         return "Crafted"
 
@@ -482,7 +497,7 @@ class Inventory:
             player.gain_crafting_experience(crafting_experience)
         else:
             print("Inventory is full. Cannot craft this item.")
-            print()
+            
 
     def add_item(self, item: Item, count: int = 1):
         """Add an item to the inventory."""
@@ -498,7 +513,7 @@ class Inventory:
             item.trigger_quest(self.player)
         else:
             print(f'Inventory is full. Cannot add {item.name}.')
-            print()
+            
     def display_recipes(self):
         """Display all known recipes."""
         print("Known Recipes:")
@@ -537,7 +552,7 @@ class Inventory:
         return len(self.contents)
 
 class Character: # Player
-    def __init__(self, name: str, inventory: Inventory, character_class: str, max_health: float=100.0, strength: float=10.0, intelligence: float=10.0, agility: float=10.0, luck: float=10.0,  experience: float=0.0, level: int=1, saturation: float=10.0, max_mana: float=15.0, quests: list[Quest]=[], reputation: dict['Faction': int]={}, completed_quests: list[Quest]=[], city: City=None, race: str='Human', special_abilities: list[str]=[], achievements: list[str]=[], skills: list['Skill']=[], crafting_level: int = 1, crafting_experience: float = 0, gold: int = 100, x: float=400, y: float=300, faction_reputation: dict[str, int]={}, faction: 'Faction' = None):
+    def __init__(self, name: str, character_class: str='Warrior', inventory: Inventory=None, max_health: float=100.0, strength: float=10.0, intelligence: float=10.0, agility: float=10.0, luck: float=10.0,  experience: float=0.0, level: int=1, saturation: float=10.0, max_mana: float=15.0, quests: list[Quest]=[], reputation: dict['Faction': int]={}, completed_quests: list[Quest]=[], city: City=None, race: str='Human', special_abilities: list[str]=[], achievements: list[str]=[], skills: list['Skill']=[], crafting_level: int = 1, crafting_experience: float = 0, gold: int = 100, x: float=400, y: float=300, faction_reputation: dict[str, int]={}, faction: 'Faction' = None):
         self.x = x
         self.y = y
         self.color = GREEN
@@ -546,7 +561,7 @@ class Character: # Player
         self.name = name
         self.race = race
         self.max_health = max_health
-        self.inventory = inventory
+        self.inventory = inventory if inventory else Inventory(self, known_recipes=recipes, contents=[[Item('Wood'), 10], [Item('Iron'), 10]])
         self.character_class = character_class
         self.strength = strength
         self.intelligence = intelligence
@@ -581,6 +596,7 @@ class Character: # Player
         self.crafting_experience = crafting_experience
         self.gold = gold
         self.resting = False
+        self.load_from_db(self.name)
     def move(self, keys):
         """Move the character using the arrow keys."""
         if keys[K_UP]:
@@ -643,7 +659,7 @@ class Character: # Player
         if self.crafting_experience >= self.crafting_level * 100:
             self.level_up_crafting()
             return
-        print()
+        
     def accept_quest(self, quest: Quest):
         """Accept a quest."""
         if quest in self.quests or quest in self.completed_quests:
@@ -663,7 +679,7 @@ class Character: # Player
             if self.inventory.capacity - len(self.inventory.contents) >= len(quest.rewards):
                 quest.give_rewards(self)
             else:
-                print("Not enough space in inventory to receive quest rewards. Clear some space and come to the quest giver to receive rewards.")
+                print("Not enough space in inventory to receive quest rewards.\n Clear some space and come to the quest \n giver to receive rewards.")
                 quest.completed = True
         else:
             print(f"Quest '{quest.name}' cannot be marked complete.")
@@ -673,7 +689,7 @@ class Character: # Player
         self.crafting_level += 1
         self.crafting_experience = 0
         print(f"{self.name} leveled up in crafting to level {self.crafting_level}!")
-        print()
+        
     def bind_skill(self, skill: 'Skill', key: int=1):
         """Bind a skill to a key."""
         if skill in self.skills:
@@ -687,7 +703,7 @@ class Character: # Player
             return
         if weapon.character_class != self.character_class:
             print(f"{weapon.name} cannot be equipped by a {self.character_class}. Required: {weapon.character_class}.")
-            print()
+            
             return
         if weapon in [i[0] for i in self.inventory.contents]:
             if hand == 'right':
@@ -704,7 +720,7 @@ class Character: # Player
                 print(f"{weapon.name} equipped in left hand. Your damage: {self.damage}")
         else:
             print('Weapon not in inventory')
-            print()
+            
     def check_requirements(self, item: Item) -> bool:
         """Check if the player meets the requirements to use the item."""
         if not item.requirements:
@@ -712,7 +728,7 @@ class Character: # Player
         for stat, required_value in item.requirements.items():
             if getattr(self, stat, 0) < required_value:
                 print(f"Cannot use {item.name}. Requires {stat} {required_value}. Current: {getattr(self, stat, 0)}.")
-                print()
+                
                 return False
         return True
 
@@ -722,7 +738,7 @@ class Character: # Player
             self.reputation[faction] = 0
         self.reputation[faction] += amount
         print(f'Reputation with {faction} increased by {amount}.')
-        print()
+        
     
     def decrease_reputation(self, faction: str, amount: int):
         """Decrease reputation with a faction."""
@@ -730,7 +746,7 @@ class Character: # Player
             self.reputation[faction] = 0
         self.reputation[faction] -= amount
         print(f'Reputation with {faction} decreased by {amount}.')
-        print()
+        
     
     def get_reputation(self, faction: str):
         """Get reputation with a faction."""
@@ -749,19 +765,19 @@ class Character: # Player
                 self.damage -= weapon.damage
             else:
                 print('Weapon not equipped')
-                print()
+                
         else:
             print('Weapon not in inventory')
-            print()
+            
     def learn_skill(self, skill: str, cost: int, skill_type: str, value: int):
         """Learn a skill."""
         if skill in self.skills:
             print(f'{self.name} already knows {skill}')
-            print()
+            
         else:
             self.skills[skill] = [cost, skill_type, value]
             print(f'{self.name} learned {skill}') 
-            print()
+            
     def use_skill(self, skill: 'Skill', target: 'Mob'):
         """Use a skill."""
         if skill in self.skills:
@@ -772,28 +788,28 @@ class Character: # Player
                     if target.health > target.max_health:
                         target.health = target.max_health
                     print(f'{self.name} used {skill.name} on {target.name} and healed them for {skill.value} health')
-                    print()
+                    
                 elif skill.skill_type == 'damage':
                     print(f'{self.name} used {skill.name} on {target.name}.')
                     target.take_damage(skill.value, self)
-                    print()
+                    
                 elif skill.skill_type == 'defense':
                     self.defense += skill.value
                     print(f'{self.name} used {skill.name} and increased their defense by {skill.value}')
-                    print()
+                    
             else:
                 print(f'{self.name} does not have enough mana to use {skill.name} (needs {skill.cost} mana)')
-                print()
+                
         else:
             print(f'{self.name} does not know {skill.name} skill.')
-            print()
+            
     def equip_armor(self, armor: Armor):
         """Equip an armor."""
         if not self.check_requirements(armor):
             return
         if armor.character_class != self.character_class:
             print(f"{armor.name} cannot be equipped by a {self.character_class}. Required: {armor.character_class}.")
-            print()
+            
             return
         if armor in [i[0] for i in self.inventory.contents]:
             if armor.slot == 'chest':
@@ -807,7 +823,7 @@ class Character: # Player
                 self.strength += armor.strength
                 self.agility += armor.agility
                 print(f'{armor.name} equipped')
-                print()
+                
             elif armor.slot == 'head':
                 if self.armor_head and self.armor_head != armor:
                     self.unequip_armor(self.armor_head)
@@ -819,7 +835,7 @@ class Character: # Player
                 self.strength += armor.strength
                 self.agility += armor.agility
                 print(f'{armor.name} equipped')
-                print()
+                
             elif armor.slot == 'legs':
                 if self.armor_legs and self.armor_legs != armor:
                     self.unequip_armor(self.armor_legs)
@@ -831,7 +847,7 @@ class Character: # Player
                 self.strength += armor.strength
                 self.agility += armor.agility
                 print(f'{armor.name} equipped')
-                print()
+                
             elif armor.slot == 'feet':
                 if self.armor_feet and self.armor_feet != armor:
                     self.unequip_armor(self.armor_feet)
@@ -843,28 +859,28 @@ class Character: # Player
                 self.strength += armor.strength
                 self.agility += armor.agility
                 print(f'{armor.name} equipped')
-                print()
+                
             else:
                 print('Invalid armor slot')
-                print()
+                
         else:
             print('Armor not in inventory')
-            print()
+            
     def to_city(self, city: City):
         """Travel to a city."""
         if self.city == city:
             print(f'{self.name} is already in the city {city.name}')
-            print()
+            
         else:
             self.city = city
             print(f'{self.name} is now in the city {city.name}')
-            print()
-    def display_inventory(self):
-        """Display the player's inventory."""
-        print("Your Inventory:")
-        for item in [i[0] for i in self.inventory.contents]:
-            print(f" - {item.name}")
-        print(f"Gold: {self.gold}")
+            
+    # def display_inventory(self):
+    #     """Display the player's inventory."""
+    #     print("Your Inventory:")
+    #     for item in [i[0] for i in self.inventory.contents]:
+    #         print(f" - {item.name}")
+    #     print(f"Gold: {self.gold}")
 
     def unequip_armor(self, armor: Armor):
         """unequip an armor."""
@@ -879,7 +895,7 @@ class Character: # Player
                     self.strength -= armor.strength
                     self.agility -= armor.agility
                     print(f'{armor.name} unequipped')
-                    print()
+                    
                 elif self.armor_head == armor:
                     self.armor_head = None
                     self.defense -= armor.defense
@@ -889,7 +905,7 @@ class Character: # Player
                     self.strength -= armor.strength
                     self.agility -= armor.agility
                     print(f'{armor.name} unequipped')
-                    print()
+                    
                 elif self.armor_legs == armor:
                     self.armor_legs = None
                     self.defense -= armor.defense
@@ -899,7 +915,7 @@ class Character: # Player
                     self.strength -= armor.strength
                     self.agility -= armor.agility
                     print(f'{armor.name} unequipped')
-                    print()
+                    
                 elif self.armor_feet == armor:
                     self.armor_feet = None
                     self.defense -= armor.defense
@@ -909,10 +925,10 @@ class Character: # Player
                     self.strength -= armor.strength
                     self.agility -= armor.agility
                     print(f'{armor.name} unequipped')
-                    print()
+                    
                 else:
                     print('Armor not equipped')
-                    print()
+                    
     def attack(self, target: 'Mob'):
         """Attack a target."""
         is_critical = randint(1, 100) <= self.luck
@@ -927,18 +943,16 @@ class Character: # Player
         target.take_damage(damage, attacker=self)
 
         if self.right_hand:
-            self.right_hand.durskill -= 1
-            if self.right_hand.durskill <= 0:
+            self.right_hand.durability -= 1
+            if self.right_hand.durability <= 0:
                 print(f"{self.right_hand.name} has broken!")
-                if not self.left_hand:
-                    print()
                 self.inventory.remove_item(self.right_hand)
                 self.unequip_weapon(self.right_hand)
         if self.left_hand:
-            self.left_hand.durskill -= 1
-            if self.left_hand.durskill <= 0:
+            self.left_hand.durability -= 1
+            if self.left_hand.durability <= 0:
                 print(f"{self.left_hand.name} has broken!")
-                print()
+                
                 self.inventory.remove_item(self.left_hand)
                 self.unequip_weapon(self.left_hand)
 
@@ -974,7 +988,7 @@ class Character: # Player
                             if self.inventory.contents[i][1] == 0:
                                 del self.inventory.contents[i]
                             break
-                    print()
+                    
                 elif item.item_type == 'Food':
                     self.saturation += item.saturation
                     self.health += item.health
@@ -983,12 +997,12 @@ class Character: # Player
                     if self.saturation > self.max_saturation:
                         self.saturation = self.max_saturation
                     print(f'{self.name} consumed {item.name}. Health: {self.health}, saturation: {self.saturation}')
-                    print()
+                    
             except AttributeError:
                 print('Consume: Invalid item')
         else:
             print(f'{item.name} not found in inventory.')
-            print()
+            
     # def use_item(self, item: Item):
     #     """Use an item."""
     #     if item in [i[0] for i in self.inventory.contents]:
@@ -1000,7 +1014,7 @@ class Character: # Player
     #             self.consume(item)
     #     else:
     #         print('Item not in inventory')
-            print()
+            
     def take_damage(self, damage: float) -> bool:
         """Take damage."""
         __agility = randint(30, 100)
@@ -1010,7 +1024,7 @@ class Character: # Player
             __shield = 11
         if self.agility > __agility or __shield < 1:
             print(f'{self.name} dodged the attack' if self.agility > __agility else f'{self.name} blocked the attack')
-            print()
+            
         else:
             if self.defense > 95:
                 self.defense = 95
@@ -1018,11 +1032,9 @@ class Character: # Player
             self.health -= damage
             print(f'{self.name} took {damage} damage')
             print(f'{self.name} has {self.health if self.health >= 0 else 0} health left')
-            if self.health > 0:
-                print()
         if self.health <= 0:
                 print(f'{self.name} died')
-                print()
+                
                 self.die()
                 logger.render(10, SCREEN_HEIGHT - 200)
                 return True
@@ -1059,7 +1071,7 @@ class Character: # Player
         self.x = SCREEN_WIDTH // 2
         self.y = SCREEN_HEIGHT // 2
         print(f"{self.name} has respawned.")
-        print()
+        
     def regenerate(self, seconds: int, health_rate: float=1, mana_rate: float=1):
         """Regenerate health and mana."""
         self.resting = True
@@ -1100,20 +1112,20 @@ class Character: # Player
         if self.experience > self.level * 100:
             self.level_up()
             return
-        print()
+        
         
     def rest(self, seconds: int):
         """Rest for a number of seconds and regenerate health and mana."""
         threading.Thread(target=self.regenerate, args=(seconds, )).start()
         print(f'{self.name} rested for {seconds} seconds.')
         print(f'{self.name} has {self.health} health and {self.mana} mana.')
-        print()
+        
     def unlock_achievement(self, achievement_name: str):
         """Unlock an achievement."""
         if achievement_name not in self.achievements:
             self.achievements.append(achievement_name)
             print(f"Achievement unlocked: {achievement_name}")
-            print()
+            
 
     def draw_at(self, screen, position):
         """Draw the character at a specific screen position."""
@@ -1121,6 +1133,91 @@ class Character: # Player
         font = pygame.font.Font(None, 24)
         text = font.render(self.name, True, BLACK)
         screen.blit(text, (position[0], position[1] - 15))
+
+    def save_to_db(self, db_name="game.db"):
+        """Save the player's data to the database."""
+        if not self.inventory or not self.inventory.contents:
+            sys.stderr.write("Inventory is not initialized. Cannot save.")
+            return
+
+        # Serialize inventory as a nested JSON-compatible list
+        inventory_data = json.dumps([
+            [{"name": item.name, "description": item.description, "quality": item.quality}, quantity]
+            for item, quantity in self.inventory.contents
+        ])
+
+        connection = sqlite3.connect(db_name)
+        cursor = connection.cursor()
+
+        # Save or update player data
+        cursor.execute("""
+            INSERT INTO players (name, character_class, health, level, experience, mana, gold, inventory)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(name) DO UPDATE SET
+                character_class=excluded.character_class,
+                health=excluded.health,
+                level=excluded.level,
+                experience=excluded.experience,
+                mana=excluded.mana,
+                gold=excluded.gold,
+                inventory=excluded.inventory
+        """, (self.name, self.character_class, self.health, self.level, self.experience, self.mana, self.gold, inventory_data))
+
+        connection.commit()
+        connection.close()
+        sys.stdout.write(f"Player {self.name} saving to the database.")
+
+
+
+    def load_from_db(self, player_name, db_name="game.db"):
+        """Load a player's data from the database."""
+        connection = sqlite3.connect(db_name)
+        cursor = connection.cursor()
+
+        cursor.execute("""
+            SELECT name, character_class, health, level, experience, mana, gold, inventory
+            FROM players
+            WHERE name = ?
+        """, (player_name,))
+        player_data = cursor.fetchone()
+        connection.close()
+
+        if not player_data:
+            sys.stderr.write(f"No player found with the name {player_name}.")
+            return
+
+        name, character_class, health, level, experience, mana, gold, inventory_data = player_data
+
+        # Deserialize inventory
+        inventory = Inventory(player=self)
+        inventory.contents = []
+        try:
+            for item_data, quantity in json.loads(inventory_data):
+                # Reconstruct the Item
+                item = Item(
+                    name=item_data["name"],
+                    description=item_data.get("description", ""),
+                    quality=item_data.get("quality", "Common")
+                )
+                inventory.contents.append([item, quantity])
+        except (TypeError, ValueError) as e:
+            sys.stderr.write(f"Error deserializing inventory: {e}")
+            inventory.contents = []
+
+        # Update character attributes
+        self.name = name if name else self.name
+        self.character_class = character_class if character_class else self.character_class
+        self.health = health if health else self.health
+        self.level = level if level else self.level
+        self.experience = experience if experience else self.experience
+        self.mana = mana if mana else self.mana
+        self.gold = gold if gold else self.gold
+        self.inventory = inventory if inventory else self.inventory
+
+        print(f"Player {self.name} loaded from the database.")
+
+
+
 
 class Skill: # To not store skills in a tuple because it is inconvenient to use.
     def __init__(self, name: str, skill_type: str, value: float, cost: float):
@@ -1215,7 +1312,7 @@ class Mob: # Anything that can be killed.
                     attacker.inventory.add_item(self.loot)
                     print(f'You have gained {self.loot.name}!')
                 else:
-                    print(f'ou have no room in your inventory for {self.loot.name}')       
+                    print(f'You have no room in your inventory for {self.loot.name}')       
             if self.trigger: # Grant reward if available
                     attacker.complete_quest(self.trigger)
             # Grant experience
@@ -1247,7 +1344,6 @@ class Mob: # Anything that can be killed.
                         self.health += self.skills[i].value
                         self.mana -= self.skills[i].cost
                         print(f'{self.name} used skill {i} and healed for {self.mana}')
-                        print()
                         if self.health > self.max_health:
                             self.health = self.max_health
                         if self.mana < 0:
@@ -1292,7 +1388,7 @@ class WorldClock: # Do not used yet. Planning to add a day/night cycle with mino
     def print_day_info(self):
         """Print the current day and time of day."""
         print(f"Day {self.day}: {self.time_of_day}")
-        print()
+        
 
 class NPC: # NPC with quests
     def __init__(self, name: str, quests: list[Quest], x: int, y: int):
@@ -1558,7 +1654,7 @@ def display_print(*args, **kwargs):
     color = kwargs.get("color", (0, 0, 0))  # Default color is black
     logger.log(message, color)  # Log the message in the TextLogger
 
-# builtins.print = display_print
+builtins.print = display_print
 
 class Camera:
     def __init__(self, width, height):
@@ -1616,13 +1712,6 @@ class GameWorld:
         for resource in self.resources:
             resource.respawn()
 
-    def draw_resources(self, screen, camera):
-        for resource in self.resources:
-            if not resource.collected:
-                screen_x, screen_y = camera.apply(resource)
-                print(f"Drawing resource at ({screen_x}, {screen_y})")  # Debug log
-                pygame.draw.circle(screen, (0, 255, 0), (screen_x, screen_y), 10)
-
 
 
     def interact_with_resource(self, player_x, player_y, inventory):
@@ -1670,15 +1759,9 @@ guild_of_merchants = Faction(name="Guild of Merchants", description="A coalition
 dark_brotherhood = Faction(name="Dark Brotherhood", description="A secretive guild of assassins.", base_reputation=-10)
 
 # Define player and inventory
-player = Character(name="Eldrin", inventory=None, character_class="Warrior", skills=[Skill('Fireball', 'damage', 100, 10)])
-player_inventory = Inventory(player, known_recipes=recipes)
-player.inventory = player_inventory
+player = Character(name='Eldrin', inventory=None, character_class="Warrior", skills=[Skill('Fireball', 'damage', 100, 10)])
+player.load_from_db("Eldrin")
 
-# Add items and recipes to inventory
-player.inventory.add_recipe(recipes[0])
-player.inventory.add_recipe(recipes[1])
-player.inventory.add_item(Item("Wood"), 10)
-player.inventory.add_item(Item("Iron Ore"), 10)
 
 # Define mobs
 mobs = [
@@ -1871,22 +1954,19 @@ def draw_minimap(screen, world, player, mobs, cities, resources):
     """
     Draw a dynamic minimap centered on the player,  showing nearby entities.
     """
-    # Define minimap size and position
     minimap_width, minimap_height = 200, 200
     minimap_x, minimap_y = SCREEN_WIDTH - minimap_width - 20, 20  # Top-right corner
 
-    # Create the minimap surface
     minimap = pygame.Surface((minimap_width, minimap_height))
-    minimap.fill((0, 0, 0))  # Black background
+    minimap.fill((BLACK))
 
-    # Calculate scaling factors
     scale_x = minimap_width / 1000  # Display a 1000x1000 area around the player
     scale_y = minimap_height / 1000
 
     # Calculate the player's position on the minimap (centered)
     player_minimap_x = minimap_width // 2
     player_minimap_y = minimap_height // 2
-    pygame.draw.circle(minimap, (0, 255, 0), (player_minimap_x, player_minimap_y), 5)  # Green for player
+    pygame.draw.circle(minimap, (GREEN), (player_minimap_x, player_minimap_y), 5)
 
     # Draw cities relative to the player
     for city in cities:
@@ -1897,7 +1977,7 @@ def draw_minimap(screen, world, player, mobs, cities, resources):
 
         # Only draw cities within the minimap bounds
         if 0 <= city_minimap_x <= minimap_width and 0 <= city_minimap_y <= minimap_height:
-            pygame.draw.rect(minimap, (0, 0, 255), (city_minimap_x - 2, city_minimap_y - 2, 5, 5))  # Blue for cities
+            pygame.draw.rect(minimap, (BLUE), (city_minimap_x - 2, city_minimap_y - 2, 5, 5))
 
     # Draw mobs relative to the player
     for mob in mobs:
@@ -1909,9 +1989,9 @@ def draw_minimap(screen, world, player, mobs, cities, resources):
 
         # Only draw mobs within the minimap bounds
         if 0 <= mob_minimap_x <= minimap_width and 0 <= mob_minimap_y <= minimap_height:
-            pygame.draw.circle(minimap, (255, 0, 0), (mob_minimap_x, mob_minimap_y), 3)  # Red for mobs
+            pygame.draw.circle(minimap, (RED), (mob_minimap_x, mob_minimap_y), 3)
 
-# Draw resources relative to the player
+    # Draw resources relative to the player
     for resource in resources:
         if not resource.collected:
             res_dx = (resource.x - player.x) * scale_x
@@ -1921,7 +2001,7 @@ def draw_minimap(screen, world, player, mobs, cities, resources):
 
             # Only draw resources within the minimap bounds
             if 0 <= res_minimap_x <= minimap_width and 0 <= res_minimap_y <= minimap_height:
-                pygame.draw.circle(minimap, (255, 255, 0), (res_minimap_x, res_minimap_y), 3)  # Yellow for resources
+                pygame.draw.circle(minimap, (YELLOW), (res_minimap_x, res_minimap_y), 3)
 
         # Blit the minimap onto the main screen
     screen.blit(minimap, (minimap_x, minimap_y))

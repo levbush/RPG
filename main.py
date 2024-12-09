@@ -7,21 +7,22 @@ while running:
     if player.alive and not player.resting:
         for event in pygame.event.get():
             if event.type == QUIT:
+                player.save_to_db()
                 running = False
             elif event.type == KEYDOWN:
 
-                if event.key == K_e:
+                if event.key == K_SPACE:
+                    for mob in mobs:
+                        if abs(player.x - mob.x) < 50 and abs(player.y - mob.y) < 50:
+                            player.attack(mob)
+
+                elif event.key == K_e:
                     render_inventory_menu(screen, player)
 
                 elif event.key == K_q:
                     print("Quests:")
                     for quest in player.quests:
                         print(f" - {quest.name}")
-
-                elif event.key == K_SPACE:
-                    for mob in mobs:
-                        if abs(player.x - mob.x) < 50 and abs(player.y - mob.y) < 50:
-                            player.attack(mob)
 
                 elif event.key == K_f:
 
@@ -39,7 +40,8 @@ while running:
 
                 elif event.key == K_m:
                     show_full_map = not show_full_map
-
+                
+                
     if not show_full_map:
         if player.alive and not player.resting:
             keys = pygame.key.get_pressed()
@@ -95,6 +97,11 @@ while running:
         logger.render(10, SCREEN_HEIGHT - 200)
     else:
         draw_full_world_map(screen, world, player, mobs, cities, world.resources)
+    
+    text_surface = font.render('Health: ' + str(player.health), True, RED)
+    screen.blit(text_surface, (0, 0))
+    text_surface = font.render('Mana: ' + str(player.mana), True, BLUE)
+    screen.blit(text_surface, (0, 20))
     pygame.display.flip()
     clock.tick(60)
 
