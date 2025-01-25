@@ -11,18 +11,11 @@ cursor.execute('''
     CREATE TABLE IF NOT EXISTS players (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     name TEXT UNIQUE NOT NULL,
-    character_class TEXT NOT NULL,
-    health REAL NOT NULL,
-    level INTEGER NOT NULL,
-    experience REAL NOT NULL,
-    mana REAL NOT NULL,
-    gold INTEGER NOT NULL,
-    inventory TEXT -- JSON string
+    character_data TEXT NOT NULL
 );''')
 conn.commit()
 conn.close()
 
-# Game
 pygame.init()
 SCREEN_WIDTH, SCREEN_HEIGHT = 800, 600
 screen = pygame.display.set_mode((SCREEN_WIDTH, SCREEN_HEIGHT))
@@ -65,31 +58,37 @@ class Faction:
         if self.influence < 0:
             self.influence = 0
         print(f"{self.name}'s influence decreased to {self.influence}.")
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
 guild_of_merchants = Faction(name="Guild of Merchants", description="A coalition of traders and shopkeepers.")
 dark_brotherhood = Faction(name="Dark Brotherhood", description="A secretive guild of assassins.", base_reputation=-10)
 factions = [guild_of_merchants, dark_brotherhood]
 
-@dataclass(unsafe_hash=True)
+@dataclass(frozen=True)
 class Item:
     name: str
     description: str = ''
     requirements: dict = None
     quality: str = 'Common'
-    trigger: 'Quest' = None # Quest that triggers the item
+    trigger: 'Quest' = None
     price: int = None
     def trigger_quest(self, player: 'Character'):
         """Trigger the quest for the player."""
         if self.trigger: # Grant reward if available
             player.complete_quest(self.trigger)
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
-@dataclass(unsafe_hash=True)
+@dataclass(frozen=True)
 class Artifact(Item):
     name: str
     description: str = ''
     traits: dict=None
 
-@dataclass(unsafe_hash=True)
+@dataclass(frozen=True)
 class Weapon(Item):
     character_class: str = 'Warrior'
     damage: float = 10.0
@@ -97,18 +96,18 @@ class Weapon(Item):
     quality: str = 'Common'
     weapon_type: str = 'Weapon'
 
-@dataclass(unsafe_hash=True)
+@dataclass(frozen=True)
 class Sword(Weapon):
     length: float = 100.0
 
-@dataclass(unsafe_hash=True)
+@dataclass(frozen=True)
 class Wand(Weapon):
     weapon_type = 'Wand'
     item_type = 'Wand'
     range: float = 20.0
 
 
-@dataclass(unsafe_hash=True)
+@dataclass(frozen=True)
 class Armor(Item):
     character_class: str = 'Warrior'
     defense: float = 0.1
@@ -120,18 +119,18 @@ class Armor(Item):
     slot: str = 'chest'
 
 
-@dataclass(unsafe_hash=True)
+@dataclass(frozen=True)
 class Shield(Weapon):
     weapon_type = 'Shield'
 
-@dataclass(unsafe_hash=True)
+@dataclass(frozen=True)
 class Food(Item):
     name: str = 'Food'
     health: float = 5.0
     saturation: float = 2.0
     item_type: str = 'Food'
 
-@dataclass(unsafe_hash=True)
+@dataclass(frozen=True)
 class Potion(Food):
     name: str = 'Potion'
     description: str = ''
@@ -140,16 +139,15 @@ class Potion(Food):
     value: float = 10.0
     item_type: str = 'Potion'
 class Quest: 
-    def __init__(self, name, giver, storyline, objectives, rewards: list, reputation: float = 0, gold: int = 10, experience: int = 50, faction_rewards: dict['Faction', int] = None, level: int = 1):
+    def __init__(self, name, giver, objectives, rewards: list, reputation: float = 0, money: int = 10, experience: int = 50, faction_rewards: dict['Faction', int] = None, level: int = 1):
         self.name = name
         self.giver = giver
-        self.storyline = storyline
-        self.objectives = objectives  # List of objectives
-        self.current_objective = 0    # Start from the first objective
+        self.objectives = objectives 
+        self.current_objective = 0
         self.completed = False
         self.rewards = rewards
         self.reputation = reputation
-        self.gold = gold
+        self.money = money
         self.experience = experience
         self.rewarded = False
         self.faction_rewards = faction_rewards or {}
@@ -166,8 +164,8 @@ class Quest:
                     print(f"{player.name} received reward: {reward.name}.")
                 else:
                     player.storage.add_item(reward)
-                player.gold += self.gold
-                print(f"Player {player.name} gained {self.gold} gold.")
+                player.money += self.money
+                print(f"Player {player.name} gained {self.money} money.")
                 player.experience += self.experience
                 print(f"Player {player.name} gained {self.experience} experience.")
                 if len(player.quests) > 1:
@@ -179,6 +177,9 @@ class Quest:
             self.rewarded = True
         else:
             print(f"Quest '{self.name}' is not completed. Rewards unavailable.")
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
 class Shop:
     def __init__(self, name: str, items: list[Item], faction: 'Faction' = None):
@@ -206,15 +207,18 @@ class Shop:
         price = getattr(item, 'price', 0)
 
         if price > 0:
-            player.gold += price
+            player.money += price
             player.inventory.remove_item(item)
-            print(f"You sold {item.name} for {price} gold.")
+            print(f"You sold {item.name} for {price} money.")
         else:
             print(f"{item.name} cannot be sold.")
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
 
 
-quests = [Quest(name="Defeat the Guardian", storyline="Defeat the Library Guardian", objectives=["Defeat the Guardian"], rewards=[Wand('Wand', quality='Epic')], giver="Library Guardian")]
+quests = [Quest(name="Defeat the Guardian", objectives=["Defeat the Guardian"], rewards=[Wand('Wand', quality='Epic')], giver="Library Guardian")]
 
 
 class CraftingStation:
@@ -270,6 +274,9 @@ class CraftingStation:
                         player.inventory.craft(recipe, player)
                     elif event.key == K_ESCAPE:  # Exit the crafting menu
                         running_crafting = False
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
 
 class Companion: # A companion is a non-player character that can assist the player in combat
@@ -296,6 +303,9 @@ class Companion: # A companion is a non-player character that can assist the pla
                 print(f"{self.name} attacks {target.name} with {skill}!")
         else:
             print(f"{self.name} doesn't have the skill '{skill}'.")
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
 
 class City:
@@ -403,6 +413,10 @@ class City:
         font = pygame.font.Font(None, 24)
         text = font.render(self.name, True, BLACK)
         screen.blit(text, (position[0], position[1] - 15))
+    
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
 class Recipe:
     def __init__(self, name: str, ingredients: list[tuple[Item, int]], result: Item, required_station: str, experience: int):
@@ -411,6 +425,10 @@ class Recipe:
         self.result = result
         self.required_station = required_station
         self.experience = experience
+
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
 class Inventory:
     def __init__(self, player: 'Character'=None, name: str='Inventory', capacity: int=20, contents: list[list[Item, int]]=[], known_recipes: list[Recipe]=[]):
@@ -550,9 +568,19 @@ class Inventory:
             raise StopIteration
     def __len__(self):
         return len(self.contents)
+    def __str__(self):
+        def format_value(v):
+            if isinstance(v, (float, int)):
+                return v
+            elif isinstance(v, list):
+                return "[" + ", ".join(map(str, v)) + "]"
+            return str(v)
+
+        params = ', '.join(f"{k}={format_value(v)}" for k, v in self.__dict__.items() if k != 'player')
+        return f"{self.__class__.__name__}({params})"
 
 class Character: # Player
-    def __init__(self, name: str, character_class: str='Warrior', inventory: Inventory=None, max_health: float=100.0, strength: float=10.0, intelligence: float=10.0, agility: float=10.0, luck: float=10.0,  experience: float=0.0, level: int=1, saturation: float=10.0, max_mana: float=15.0, quests: list[Quest]=[], reputation: dict['Faction': int]={}, completed_quests: list[Quest]=[], city: City=None, race: str='Human', special_abilities: list[str]=[], achievements: list[str]=[], skills: list['Skill']=[], crafting_level: int = 1, crafting_experience: float = 0, gold: int = 100, x: float=400, y: float=300, faction_reputation: dict[str, int]={}, faction: 'Faction' = None):
+    def __init__(self, name: str, character_class: str='Warrior', inventory: Inventory=None, max_health: float=100.0, strength: float=10.0, intelligence: float=10.0, agility: float=10.0, luck: float=10.0,  experience: float=0.0, level: int=1, saturation: float=10.0, max_mana: float=15.0, quests: list[Quest]=[], reputation: dict['Faction': int]={}, completed_quests: list[Quest]=[], city: City=None, race: str='Human', special_abilities: list[str]=[], achievements: list[str]=[], skills: list['Skill']=[], crafting_level: int = 1, crafting_experience: float = 0, money: int = 100, x: float=400, y: float=300, faction_reputation: dict[str, int]={}, faction: 'Faction' = None):
         self.x = x
         self.y = y
         self.color = GREEN
@@ -594,7 +622,7 @@ class Character: # Player
         self.alive = True
         self.crafting_level = crafting_level
         self.crafting_experience = crafting_experience
-        self.gold = gold
+        self.money = money
         self.resting = False
         self.load_from_db(self.name)
     def move(self, keys):
@@ -634,7 +662,7 @@ class Character: # Player
         self.faction_reputation[faction.name] += amount
         print(f"Reputation with {faction.name} is now {self.faction_reputation[faction.name]} ({self.get_reputation_tier(faction)}).")
 
-    def get_reputation_tier(self, faction: 'Faction') -> str:
+    def get_reputation(self, faction: 'Faction') -> str:
         """
         Get the player's reputation tier with a faction.
         :param faction: The faction object.
@@ -642,15 +670,15 @@ class Character: # Player
         """
         reputation = self.faction_reputation.get(faction.name, faction.base_reputation)
         if reputation < -50:
-            return "Hostile"
+            return "Hostile", reputation
         elif -50 <= reputation < 0:
-            return "Unfriendly"
+            return "Unfriendly", reputation
         elif 0 <= reputation < 50:
-            return "Neutral"
+            return "Neutral", reputation
         elif 50 <= reputation < 100:
-            return "Friendly"
+            return "Friendly", reputation
         else:
-            return "Honored"
+            return "Honored", reputation
 
     def gain_crafting_experience(self, exp: float):
         """"Gain crafting experience."""
@@ -865,22 +893,6 @@ class Character: # Player
                 
         else:
             print('Armor not in inventory')
-            
-    def to_city(self, city: City):
-        """Travel to a city."""
-        if self.city == city:
-            print(f'{self.name} is already in the city {city.name}')
-            
-        else:
-            self.city = city
-            print(f'{self.name} is now in the city {city.name}')
-            
-    # def display_inventory(self):
-    #     """Display the player's inventory."""
-    #     print("Your Inventory:")
-    #     for item in [i[0] for i in self.inventory.contents]:
-    #         print(f" - {item.name}")
-    #     print(f"Gold: {self.gold}")
 
     def unequip_armor(self, armor: Armor):
         """unequip an armor."""
@@ -1003,18 +1015,6 @@ class Character: # Player
         else:
             print(f'{item.name} not found in inventory.')
             
-    # def use_item(self, item: Item):
-    #     """Use an item."""
-    #     if item in [i[0] for i in self.inventory.contents]:
-    #         if issubclass(item, Weapon):
-    #             self.equip_weapon(item)
-    #         elif issubclass(item, Armor):
-    #             self.equip_armor(item, item.slot)
-    #         elif issubclass(item, Potion) or issubclass(item, Food):
-    #             self.consume(item)
-    #     else:
-    #         print('Item not in inventory')
-            
     def take_damage(self, damage: float) -> bool:
         """Take damage."""
         __agility = randint(30, 100)
@@ -1030,6 +1030,7 @@ class Character: # Player
                 self.defense = 95
             damage = round(damage * (1 - self.defense / 100), 2)
             self.health -= damage
+            self.health = round(self.health, 2)
             print(f'{self.name} took {damage} damage')
             print(f'{self.name} has {self.health if self.health >= 0 else 0} health left')
         if self.health <= 0:
@@ -1136,32 +1137,17 @@ class Character: # Player
 
     def save_to_db(self, db_name="game.db"):
         """Save the player's data to the database."""
-        if not self.inventory or not self.inventory.contents:
-            sys.stderr.write("Inventory is not initialized. Cannot save.")
-            return
 
-        # Serialize inventory as a nested JSON-compatible list
-        inventory_data = json.dumps([
-            [{"name": item.name, "description": item.description, "quality": item.quality}, quantity]
-            for item, quantity in self.inventory.contents
-        ])
 
         connection = sqlite3.connect(db_name)
         cursor = connection.cursor()
 
         # Save or update player data
         cursor.execute("""
-            INSERT INTO players (name, character_class, health, level, experience, mana, gold, inventory)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO players (name, character_data)
+            VALUES (?, ?)
             ON CONFLICT(name) DO UPDATE SET
-                character_class=excluded.character_class,
-                health=excluded.health,
-                level=excluded.level,
-                experience=excluded.experience,
-                mana=excluded.mana,
-                gold=excluded.gold,
-                inventory=excluded.inventory
-        """, (self.name, self.character_class, self.health, self.level, self.experience, self.mana, self.gold, inventory_data))
+                character_data=excluded.character_data""", (self.name, str(self)))
 
         connection.commit()
         connection.close()
@@ -1169,52 +1155,38 @@ class Character: # Player
 
 
 
-    def load_from_db(self, player_name, db_name="game.db"):
+    def load_from_db(self, player_name=None, db_name="game.db"):
         """Load a player's data from the database."""
         connection = sqlite3.connect(db_name)
         cursor = connection.cursor()
+        if not player_name:
+            player_name = self.name
 
         cursor.execute("""
-            SELECT name, character_class, health, level, experience, mana, gold, inventory
+            SELECT character_data
             FROM players
             WHERE name = ?
         """, (player_name,))
         player_data = cursor.fetchone()
         connection.close()
-
-        if not player_data:
-            sys.stderr.write(f"No player found with the name {player_name}.")
-            return
-
-        name, character_class, health, level, experience, mana, gold, inventory_data = player_data
-
-        # Deserialize inventory
-        inventory = Inventory(player=self)
-        inventory.contents = []
         try:
-            for item_data, quantity in json.loads(inventory_data):
-                # Reconstruct the Item
-                item = Item(
-                    name=item_data["name"],
-                    description=item_data.get("description", ""),
-                    quality=item_data.get("quality", "Common")
-                )
-                inventory.contents.append([item, quantity])
-        except (TypeError, ValueError) as e:
-            sys.stderr.write(f"Error deserializing inventory: {e}")
-            inventory.contents = []
-
-        # Update character attributes
-        self.name = name if name else self.name
-        self.character_class = character_class if character_class else self.character_class
-        self.health = health if health else self.health
-        self.level = level if level else self.level
-        self.experience = experience if experience else self.experience
-        self.mana = mana if mana else self.mana
-        self.gold = gold if gold else self.gold
-        self.inventory = inventory if inventory else self.inventory
-
+            global player
+            player = eval(player_data)
+            player.inventory.player = player
+        except Exception as e:
+            sys.stderr.write(f"Error loading player from database: {e}")
         print(f"Player {self.name} loaded from the database.")
+    
+    def __str__(self):
+        def format_value(v):
+            if isinstance(v, (float, int)):
+                return v
+            elif isinstance(v, list):
+                return "[" + ", ".join(map(str, v)) + "]"
+            return str(v)
+
+        params = ', '.join(f"{k}={format_value(v)}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
 
 
@@ -1229,6 +1201,10 @@ class Skill: # To not store skills in a tuple because it is inconvenient to use.
         """Level up."""
         self.value += 3
         self.cost += 2
+
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
 class Mob: # Anything that can be killed.
     def __init__(
@@ -1301,6 +1277,7 @@ class Mob: # Anything that can be killed.
             return
 
         self.health -= damage
+        self.health = round(self.health, 2)
         print(f"{self.name} took {damage} damage. Remaining health: {max(self.health, 0)}.")
 
         if self.health <= 0:
@@ -1366,6 +1343,9 @@ class Mob: # Anything that can be killed.
             font = pygame.font.Font(None, 24)
             text = font.render(self.name, True, BLACK)
             screen.blit(text, (position[0], position[1] - 15))
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
 
 
 class WorldClock: # Do not used yet. Planning to add a day/night cycle with minor events.
@@ -1375,7 +1355,7 @@ class WorldClock: # Do not used yet. Planning to add a day/night cycle with mino
 
     def advance_time(self):
         """Advance the time by one day."""
-        self.day += 1
+        self.day += 0.25
         if self.time_of_day == "Morning":
             self.time_of_day = "Afternoon"
         elif self.time_of_day == "Afternoon":
@@ -1387,10 +1367,14 @@ class WorldClock: # Do not used yet. Planning to add a day/night cycle with mino
 
     def print_day_info(self):
         """Print the current day and time of day."""
-        print(f"Day {self.day}: {self.time_of_day}")
+        print(f"Day {int(self.day)}: {self.time_of_day}")
+
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
         
 
-class NPC: # NPC with quests
+class NPC:
     def __init__(self, name: str, quests: list[Quest], x: int, y: int):
         self.name = name
         self.quests = quests
@@ -1421,6 +1405,10 @@ class NPC: # NPC with quests
         text = font.render(self.name, True, BLACK)
         screen.blit(text, (position[0], position[1] - 15))
 
+    def __str__(self):
+        params = ', '.join(f"{str(k)}={str(v) if not (isinstance(v, float) or isinstance(v, int)) else v}" for k, v in self.__dict__.items())
+        return f"{self.__class__.__name__}({params})"
+
 def display_notification(text, color, duration=2):
     """Display a temporary notification on the screen."""
     notification_font = pygame.font.Font(None, 36)
@@ -1429,16 +1417,15 @@ def display_notification(text, color, duration=2):
     pygame.display.flip()
     pygame.time.wait(int(duration * 1000))
 
-def sleep(duration): # Useless but exists.
-    """Pause the game for a specified duration."""
-    time.sleep(duration)
+sleep = time.sleep
+
 
 def render_shop_menu(screen, shop: Shop, player: Character):
     """Render the shop menu and handle player interaction."""
     if shop.faction:
-        tier = player.get_reputation_tier(shop.faction)
+        tier, reputation = player.get_reputation(shop.faction)
         if tier == "Hostile":
-            print(f"The {shop.faction.name} refuses to trade with you.")
+            print(f"The {shop.faction.name} refuses to trade with you due to your poor reputation.")
             return
         elif tier == "Unfriendly":
             print(f"The {shop.faction.name} imposes a 20% surcharge due to your poor reputation.")
@@ -1446,20 +1433,21 @@ def render_shop_menu(screen, shop: Shop, player: Character):
         # Apply discounts or penalties based on reputation tier
         multiplier = 1.0
         if tier == "Friendly":
-            multiplier = 0.9  # 10% discount
+            multiplier = 0.9
         elif tier == "Unfriendly":
-            multiplier = 1.2  # 20% surcharge
+            multiplier = 1.2
+        elif tier == 'Honored':
+            multiplier = min(0.8, 0.8 * 100 / (reputation / 2))
 
         print(f"Welcome to {shop.name}!" + (f"Prices adjusted for your reputation ({tier}).") if shop.faction else "")
         for idx, item in enumerate(shop.items, start=1):
-            adjusted_price = int(getattr(item, 'price', 0) * multiplier)
-            print(f"{idx}. {item.name} - {adjusted_price} gold")
+            adjusted_price = int(item.price * multiplier)
+            print(f"{idx}. {item.name} - {adjusted_price} money")
 
-        # Buying logic remains unchanged, just apply adjusted prices
     menu_font = pygame.font.Font(None, 36)
     title_font = pygame.font.Font(None, 48)
     running_shop = True
-    selected_item = 0  # Index of the currently selected item
+    selected_item = 0
 
     while running_shop:
         # Fill the screen for the shop menu
@@ -1474,14 +1462,14 @@ def render_shop_menu(screen, shop: Shop, player: Character):
         for i, item in enumerate(shop.items):
             color = BLACK if i != selected_item else RED  # Highlight selected item
             item_text = menu_font.render(
-                f"{item.name} - {item.quality} - {item.price * multiplier} Gold", True, color
+                f"{item.name} - {item.quality} - {item.price * multiplier} money", True, color
             )
             screen.blit(item_text, (50, y_offset))
             y_offset += 40
 
-        # Render player's gold
-        gold_text = menu_font.render(f"Your Gold: {player.gold}", True, BLACK)
-        screen.blit(gold_text, (50, y_offset + 20))
+        # Render player's money
+        money_text = menu_font.render(f"Your money: {player.money}", True, BLACK)
+        screen.blit(money_text, (50, y_offset + 20))
 
         pygame.display.flip()
 
@@ -1497,13 +1485,13 @@ def render_shop_menu(screen, shop: Shop, player: Character):
                     selected_item = (selected_item - 1) % len(shop.items)  # Navigate up
                 elif event.key in [K_RETURN, K_RIGHT]:  # Buy selected item
                     item = shop.items[selected_item]
-                    if player.gold >= item.price * multiplier:
-                        player.gold -= item.price * multiplier
+                    if player.money >= adjusted_price:
+                        player.money -= adjusted_price
                         player.inventory.add_item(item)
                         print(f"You bought {item.name}!")
                     else:
-                        print("Not enough gold!")
-                elif event.key == K_ESCAPE:  # Exit the shop menu
+                        print("Not enough money!")
+                elif event.key == K_ESCAPE:
                     running_shop = False
 
 def render_inventory_menu(screen, player: Character, page: int = 1, items_per_page: int = 5):
@@ -1561,7 +1549,7 @@ def render_inventory_menu(screen, player: Character, page: int = 1, items_per_pa
                             page -= 1
                             if page == 0:
                                 page = total_pages
-                            selected_item = items_per_page - 1 if page != total_pages else len(player.inventory) % page
+                            selected_item = min(items_per_page - 1, len(items) - 1)
                         else:
                             selected_item = (selected_item - 1) % len(items)
                     else:
@@ -1570,7 +1558,7 @@ def render_inventory_menu(screen, player: Character, page: int = 1, items_per_pa
                             selected_item = len(items) - 1
                 elif event.key == K_DOWN:  # Navigate down in the list
                     if len(player.inventory) > items_per_page:
-                        if selected_item == items_per_page - 1 or selected_item == len(player.inventory) % page and page == total_pages:
+                        if selected_item >= len(items) - 1:
                             page += 1
                             if page > total_pages:
                                 page = 1
@@ -1608,7 +1596,6 @@ def render_inventory_menu(screen, player: Character, page: int = 1, items_per_pa
                             print("Cannot unequip this item.")
                 elif event.key == K_ESCAPE:  # Exit the inventory menu
                     running_inventory = False
-
 def paginate_list(items: list, items_per_page: int, page: int):
     """
     Paginate a list into pages of a given size..
@@ -1748,28 +1735,23 @@ recipes = [
     ),
 ]
 
-# Define crafting stations
 crafting_stations = [
     CraftingStation(name="Blacksmith Forge", station_type="Forge"),
     CraftingStation(name="Alchemy Table", station_type="Alchemy")
 ]
 
-# Define factions
 guild_of_merchants = Faction(name="Guild of Merchants", description="A coalition of traders and shopkeepers.")
 dark_brotherhood = Faction(name="Dark Brotherhood", description="A secretive guild of assassins.", base_reputation=-10)
 
-# Define player and inventory
-player = Character(name='Eldrin', inventory=None, character_class="Warrior", skills=[Skill('Fireball', 'damage', 100, 10)])
-player.load_from_db("Eldrin")
+player = Character(name=input('Your name: '), inventory=None, character_class="Warrior", skills=[Skill('Fireball', 'damage', 100, 10)])
 
 
-# Define mobs
 mobs = [
     Mob(
         name="Library Guardian", x=200, y=200, health=30, max_health=30, damage=50,
         trigger=Quest(
-            name="Rescue the Merchant", giver="Elder Doran", storyline="Rescue the merchant captured by bandits.",
-            objectives=["Defeat the bandits", "Rescue the merchant"],
+            name="Kill the Library Guardian", giver="Elder Doran",
+            objectives=["Kill the Library Guardian"],
             rewards=[Item(name="Book of Knowledge", description="Contains ancient knowledge.", quality="Legendary")],
             faction_rewards={"Guild of Merchants": 30}
         ),
@@ -1788,18 +1770,12 @@ cities = [
 ]
 
 
-# Define NPCs
 npcs = [
     NPC(name="Eldora", quests=[], x=400, y=400),
     NPC(name="Galen", quests=[mobs[0].trigger], x=500, y=500)
 ]
 
-# Define world
 world = GameWorld(width=2000, height=2000, num_resources=20)
-
-# Adjust player reputation
-player.adjust_reputation(guild_of_merchants, 50)
-player.adjust_reputation(dark_brotherhood, -15)
 
 
 
@@ -1809,12 +1785,11 @@ player.adjust_reputation(dark_brotherhood, -15)
 GRAY = (128, 128, 128)
 
 # Drawing logic for the main game screen
-def draw_screen(screen, player, mobs, npcs, cities, camera, font, world):
+def draw_screen(screen, player: Character, mobs, npcs, cities, camera, font, world):
     """Draw all game entities on the main screen."""
     # Fill the background
     screen.fill(WHITE)
     logger.render(10, SCREEN_HEIGHT - 200)
-    # Draw the world (e.g., regions)
     world.draw(screen, camera)
 
     # Draw player
@@ -1853,18 +1828,6 @@ def draw_screen(screen, player, mobs, npcs, cities, camera, font, world):
     mana_text = font.render(f"Mana: {player.mana}/{player.max_mana}", True, BLUE)
     screen.blit(health_text, (10, 10))
     screen.blit(mana_text, (10, 50))
-
-    # Display active quest objectives
-    if player.active_quest:
-        if not player.active_quest.completed:
-            objective_text = font.render(
-                f"Objective: {player.active_quest.objectives[player.active_quest.current_objective]}",
-                True, BLACK
-            )
-            screen.blit(objective_text, (10, 90))
-        else:
-            completed_text = font.render("Quest Complete!", True, GREEN)
-            screen.blit(completed_text, (10, 90))
 
 
 # Minimap Drawing Logic
@@ -1988,8 +1951,8 @@ def draw_minimap(screen, world, player, mobs, cities, resources):
             mob_minimap_y = int(player_minimap_y + mob_dy)
 
         # Only draw mobs within the minimap bounds
-        if 0 <= mob_minimap_x <= minimap_width and 0 <= mob_minimap_y <= minimap_height:
-            pygame.draw.circle(minimap, (RED), (mob_minimap_x, mob_minimap_y), 3)
+            if 0 <= mob_minimap_x <= minimap_width and 0 <= mob_minimap_y <= minimap_height:
+                pygame.draw.circle(minimap, (RED), (mob_minimap_x, mob_minimap_y), 3)
 
     # Draw resources relative to the player
     for resource in resources:
@@ -2023,7 +1986,6 @@ def generate_random_mob(world_width: int, world_height: int) -> Mob:
     loot = random.choice(loot_items)
     level = random.randint(1, 10)
 
-    # Random position within world bounds
     x = random.randint(0, world_width)
     y = random.randint(0, world_height)
 
@@ -2033,18 +1995,17 @@ def generate_random_city(world_width: int, world_height: int, factions: list[Fac
     """
     Generate a random city with randomized attributes and position.
     """
-    city_names = ["Ironhold", "Silverpeak", "Oakvale", "Rivermouth", "Sunspire"]
+    syllables = ["ael", "wyn", "mir", "dun", "vale", "crest", "shire", "wick", "ford", "ton", "berg", "dale", "gate", "wood", "fell", "port", "land", "mont", "brook", "stone", "lake", "view", "glen", "vale"]    
     shop_items = [
         Item(name="Health Potion", description="Restores health.", quality="Common", price=10),
         Weapon(name="Steel Sword", description="A sharp blade.", quality="Uncommon", damage=25, price=50),
         Armor(name="Leather Armor", description="Basic protection.", quality="Common", defense=5, price=30)
     ]
 
-    name = random.choice(city_names)
+    name = ''.join(random.sample(syllables, random.randint(2, 3))).capitalize()
     population = random.randint(500, 5000)
     guards = random.randint(50, 500)
 
-    # Randomly assign a faction
     faction = random.choice(factions)
 
     # Generate random shops
@@ -2067,9 +2028,6 @@ def generate_random_city(world_width: int, world_height: int, factions: list[Fac
 
 
 
-
-
-
 for _ in range(5):
     cities.append(generate_random_city(5000, 5000, [guild_of_merchants, dark_brotherhood], crafting_stations))
 
@@ -2077,7 +2035,7 @@ for _ in range(10):
     mobs.append(generate_random_mob(5000, 5000))
 
 
-show_full_map = False  # Boolean to track the map view state
+show_full_map = False
 
 def draw_full_world_map(screen, world: GameWorld, player: Character, mobs: list[Mob], cities: list[City], resources: list[Resource]):
     """
@@ -2087,9 +2045,8 @@ def draw_full_world_map(screen, world: GameWorld, player: Character, mobs: list[
     map_width, map_height = 400, 400  # Full map dimensions
     map_x, map_y = (SCREEN_WIDTH - map_width) // 2, (SCREEN_HEIGHT - map_height) // 2  # Center on screen
 
-    # Create the full map surface
     world_map = pygame.Surface((map_width, map_height))
-    world_map.fill((0, 0, 0))  # Black background
+    world_map.fill(BLACK)
 
     # Calculate scaling factors
     scale_x = map_width / world.width
@@ -2099,33 +2056,87 @@ def draw_full_world_map(screen, world: GameWorld, player: Character, mobs: list[
     for city in cities:
         city_map_x = int(city.x * scale_x)
         city_map_y = int(city.y * scale_y)
-        pygame.draw.rect(world_map, (0, 0, 255), (city_map_x - 2, city_map_y - 2, 5, 5))  # Blue for cities
+        pygame.draw.rect(world_map, BLUE, (city_map_x - 2, city_map_y - 2, 5, 5))
 
     # Draw mobs
     for mob in mobs:
         if mob.alive:
             mob_map_x = int(mob.x * scale_x)
             mob_map_y = int(mob.y * scale_y)
-            pygame.draw.circle(world_map, (255, 0, 0), (mob_map_x, mob_map_y), 3)  # Red for mobs
-
+            pygame.draw.circle(world_map, RED, (mob_map_x, mob_map_y), 3)
     # Draw resources
     for resource in resources:
         if not resource.collected:
             resource_map_x = int(resource.x * scale_x)
             resource_map_y = int(resource.y * scale_y)
-            pygame.draw.circle(world_map, (255, 255, 0), (resource_map_x, resource_map_y), 2)  # Yellow for resources
+            pygame.draw.circle(world_map, YELLOW, (resource_map_x, resource_map_y), 2)
     for npc in npcs:
         npc_map_x = int(npc.x * scale_x)
         npc_map_y = int(npc.y * scale_y)
-        pygame.draw.rect(world_map, (0, 0, 255), (npc_map_x, npc_map_y, 3, 3))  # Blue for npcs
+        pygame.draw.rect(world_map, BLUE, (npc_map_x, npc_map_y, 3, 3))  # Blue for npcs
 
     # Draw the player's position
     player_map_x = int(player.x * scale_x)
     player_map_y = int(player.y * scale_y)
-    pygame.draw.rect(world_map, (0, 255, 0), (player_map_x, player_map_y, 5, 5))  # Green for player
+    pygame.draw.rect(world_map, GREEN, (player_map_x, player_map_y, 5, 5))  # Green for player
 
-    # Blit the full map onto the main screen
     screen.blit(world_map, (map_x, map_y))
 
-    # Optional: Add a border and title for the map
-    pygame.draw.rect
+
+def render_quest_menu(screen, player: Character):
+    """Render the quest menu and allow the player to interact with their quests."""
+    running_quest_menu = True
+    selected_quest = 0
+    font = pygame.font.Font(None, 36)
+    detail_font = pygame.font.Font(None, 28)
+
+    while running_quest_menu:
+        # Clear the screen
+        screen.fill(WHITE)
+
+        # Title
+        title_text = font.render("Quest Menu", True, BLACK)
+        screen.blit(title_text, (20, 20))
+
+        # Display active quests
+        quests = player.quests
+        for idx, quest in enumerate(quests):
+            color = RED if idx == selected_quest else BLACK
+            quest_text = f"{quest.name} - {'Completed' if quest.completed else 'In Progress'}"
+            text_surface = font.render(quest_text, True, color)
+            screen.blit(text_surface, (40, 80 + idx * 40))
+
+        # Display selected quest details
+        if quests:
+            selected = quests[selected_quest]
+            details = [
+                f"Name: {selected.name}",
+                f"Status: {'Completed' if selected.completed else 'In Progress'}",
+                f"Objective: {selected.objectives[selected.current_objective]}",
+                f"Rewards: {[reward.name for reward in selected.rewards]}",
+                f"Experience: {selected.experience}",
+                f"Money: {selected.money}"
+            ]
+            for i, line in enumerate(details):
+                detail_surface = detail_font.render(line, True, GRAY)
+                screen.blit(detail_surface, (50, 350 + i * 30))
+
+        # Handle input
+        pygame.display.flip()
+        for event in pygame.event.get():
+            if event.type == QUIT:
+                pygame.quit()
+                exit()
+            elif event.type == KEYDOWN:
+                if event.key == K_DOWN:
+                    selected_quest = (selected_quest + 1) % len(quests)
+                elif event.key == K_UP:
+                    selected_quest = (selected_quest - 1) % len(quests)
+                elif event.key == K_RETURN:  # Claim rewards if completed
+                    if quests[selected_quest].completed and not quests[selected_quest].rewarded:
+                        quests[selected_quest].give_rewards(player)
+                        print(f"Rewards for '{quests[selected_quest].name}' claimed!")
+                    elif quests[selected_quest].rewarded:
+                        print("Rewards already claimed for this quest!")
+                elif event.key == K_ESCAPE:  # Exit the quest menu
+                    running_quest_menu = False

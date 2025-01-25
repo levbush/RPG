@@ -2,7 +2,7 @@ from classes import *
 
 running = True
 while running:
-    screen.fill(WHITE)  # Clear the screen
+    screen.fill(WHITE)
 
     if player.alive and not player.resting:
         for event in pygame.event.get():
@@ -20,9 +20,7 @@ while running:
                     render_inventory_menu(screen, player)
 
                 elif event.key == K_q:
-                    print("Quests:")
-                    for quest in player.quests:
-                        print(f" - {quest.name}")
+                    render_quest_menu(screen, player)
 
                 elif event.key == K_f:
 
@@ -42,7 +40,7 @@ while running:
                     show_full_map = not show_full_map
                 
                 
-    if not show_full_map:
+    if not show_full_map: # Render player name above
         if player.alive and not player.resting:
             keys = pygame.key.get_pressed()
             player.move(keys)
@@ -54,15 +52,14 @@ while running:
 
             font = pygame.font.Font(None, 24)
             name_surface = font.render(player.name, True, BLACK)
-            screen.blit(name_surface, (screen_x, screen_y - 20))  # Render player name above
+            screen.blit(name_surface, (screen_x, screen_y - 20))
 
-        for obj in mobs + npcs + cities:
+        for obj in mobs + npcs + cities: # Draw objects within the camera's view
             obj_screen_x = obj.x - camera.offset_x
             obj_screen_y = obj.y - camera.offset_y
             if -50 <= obj_screen_x <= SCREEN_WIDTH + 50 and -50 <= obj_screen_y <= SCREEN_HEIGHT + 50:
                 screen_x, screen_y = camera.apply(obj)
                 obj.draw_at(screen, (screen_x, screen_y))
-            # Draw objects within the camera's view
 
         for resource in world.resources:
             res_x, res_y = resource.x - camera.offset_x, resource.y - camera.offset_y
